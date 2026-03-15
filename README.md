@@ -1,39 +1,41 @@
 # Project Mozart
 
-一个无需后端即可直接打开的 Web 原型，用来生成、编辑、堆叠、练习单线条旋律。
+一个可直接本地打开的 Web 音乐创作原型：聚焦单线条旋律的**生成、编辑、编排、练习与导出**。
 
-## 功能
+## 给新人的 60 秒 onboarding
+1. 安装 Node.js（建议 18+）。
+2. 在仓库根目录启动静态服务：
+   - `python -m http.server 4173`
+3. 浏览器打开 `http://127.0.0.1:4173`。
+4. 首次建议路径：
+   - 在 **Generator Forge** 点击“生成旋律”。
+   - 在 **Motif Library** 保存当前 pattern。
+   - 把 motif 加入 **Phrase Builder**，尝试 block 变换。
+   - 导出 MIDI 到 DAW。
 
-- `Pattern Sequencer`
-  - 点击网格编辑单线条旋律。
-  - 支持音符时值、力度、articulation、每音 cents 偏移。
-- `Motif Library`
-  - 将当前 pattern 保存为 motif。
-  - motif 可以载入、加入 phrase、转调、生成尾句。
-- `Generator Forge`
-  - 基于音阶约束、密度、最大跳进、重复率、惊喜度、张力曲线生成旋律。
-  - 支持新 motif、变体、续写、call/response。
-- `Practice Mode`
-  - 从当前素材生成难度递进、转调、限制条件和 call/response 练习包。
-- `Playback + MIDI`
-  - 浏览器内置 Web Audio 回放。
-  - 导出标准 `.mid` 文件。
+## 文档地图（先看这个）
+- `PRD.md`：高层功能需求（why + what）。
+- `PROGRESS.md`：已实现需求与阶段进展（what done）。
+- `TODO.md`：当前待办（what next）。
+- `README.md`（本文）：新人上手与开发协作入口。
 
-## 使用方式
+## 本地开发
+### 目录结构（核心）
+- `index.html`：页面结构与模板。
+- `styles.css`：样式与布局。
+- `app.js`：UI 状态、交互编排、事件绑定。
+- `core.js`：生成/变换核心算法与纯逻辑函数。
+- `tests/core.test.js`：核心逻辑测试。
 
-1. 直接在浏览器打开 [index.html](./index.html)。
-2. 或者在当前目录启动任意静态文件服务器后访问首页。
+### 常用命令
+- 语法检查：
+  - `node --check app.js`
+  - `node --check core.js`
+- 运行测试：
+  - `node --test tests/core.test.js`
 
-## MIDI 导出策略
-
-- 使用单轨、单声部 MIDI。
-- 每个音符的 `offsetCents` 会编码为该音符开始前的 pitch bend，结束后重置到中心值。
-- 导出假定 pitch bend range 为 `±2 semitones`，适合当前单线条旋律工作流。
-
-## 测试
-
-在当前目录运行：
-
-```powershell
-node --test .\tests\core.test.js
-```
+## 协作约定（建议）
+- 功能讨论先更新 `PRD.md`（高层需求）。
+- 功能落地后更新 `PROGRESS.md`（记录已完成）。
+- 新迭代只在 `TODO.md` 维护待办，不在 TODO 中混写 done 历史。
+- 新人提 PR 前至少跑一遍 core tests。

@@ -826,18 +826,40 @@
     return pitchSpecToMidi(sourceNotes[sourceNotes.length - 1].pitch);
   }
 
-  function finalizeClosingNote(notes, mode, allowedMidis, scaleDefinition, patternGrid) {
+  function getCadenceTargetPitchClasses(scaleDefinition, cadenceTarget) {
+    const rootPc = normalizePc(scaleDefinition.rootPc);
+    const thirdPc = normalizePc(scaleDefinition.rootPc + 4);
+    const fifthPc = normalizePc(scaleDefinition.rootPc + 7);
+    const secondPc = normalizePc(scaleDefinition.rootPc + 2);
+    const sixthPc = normalizePc(scaleDefinition.rootPc + 9);
+    if (cadenceTarget === "root") {
+      return [rootPc];
+    }
+    if (cadenceTarget === "third") {
+      return [thirdPc];
+    }
+    if (cadenceTarget === "fifth") {
+      return [fifthPc];
+    }
+    if (cadenceTarget === "color") {
+      return [secondPc, sixthPc];
+    }
+    return [rootPc, fifthPc];
+  }
+
+  function finalizeClosingNote(notes, mode, allowedMidis, scaleDefinition, patternGrid, cadenceTarget) {
     if (!notes.length || !allowedMidis.length || !isClosingMode(mode)) {
       return;
     }
     const last = notes[notes.length - 1];
+    const cadenceTargetPcs = getCadenceTargetPitchClasses(scaleDefinition, cadenceTarget || "auto");
     const rootPc = scaleDefinition.rootPc;
     const fifthPc = normalizePc(scaleDefinition.rootPc + 7);
     const thirdPc = normalizePc(scaleDefinition.rootPc + 4);
     const targets = allowedMidis.filter(function (midi) {
       const pc = normalizePc(midi);
       if (mode === "cadence") {
-        return pc === rootPc || pc === fifthPc;
+        return cadenceTargetPcs.includes(pc);
       }
       return pc === rootPc || pc === thirdPc || pc === fifthPc;
     });
@@ -889,6 +911,7 @@
       preferredFormId: config.preferredFormId || "auto",
       preferredCellId: config.preferredCellId || "auto",
       surpriseZone: config.surpriseZone || "auto",
+      cadenceTarget: config.cadenceTarget || "auto",
     };
     const mode = config.mode || "new";
     const allowedMidis = getAllowedMidiNotes(config.scaleDefinition, config.instrumentProfile);
@@ -959,7 +982,7 @@
       }
     }
 
-    finalizeClosingNote(notes, mode, allowedMidis, config.scaleDefinition, patternTemplate.grid);
+    finalizeClosingNote(notes, mode, allowedMidis, config.scaleDefinition, patternTemplate.grid, settings.cadenceTarget);
     if (settings.tensionCurve === "fall") {
       enforceFallContour(notes, allowedMidis);
     }
@@ -975,6 +998,7 @@
         preferredFormId: settings.preferredFormId,
         preferredCellId: settings.preferredCellId,
         surpriseZone: logicPlan.surpriseZone,
+        cadenceTarget: settings.cadenceTarget,
         blocks: logicPlan.blocks.map(function (block) {
           return {
             slot: block.slot,
@@ -1122,6 +1146,8 @@
       id: createId("block"),
       motifId: motif.id,
       motifName: motif.name,
+      relationMode: "reference",
+      frozenPattern: null,
       transform: Object.assign({ diatonicShift: 0, chromaticShift: 0, reverse: false, stretch: 1 }, transform || {}),
     });
     return sequence;
@@ -1159,10 +1185,15 @@
       const motif = motifLibrary.find(function (item) {
         return item.id === block.motifId;
       });
-      if (!motif) {
+      const sourcePattern = block.relationMode === "frozen" && block.frozenPattern
+        ? block.frozenPattern
+        : motif
+          ? motif.sourcePattern
+          : null;
+      if (!sourcePattern) {
         return;
       }
-      const transformed = transformPattern(motif.sourcePattern, block.transform, scaleDefinition, instrumentProfile);
+      const transformed = transformPattern(sourcePattern, block.transform, scaleDefinition, instrumentProfile);
       transformed.notes.forEach(function (note) {
         const clone = deepClone(note);
         clone.id = createId("note");

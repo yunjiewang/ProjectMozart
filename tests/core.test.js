@@ -305,3 +305,58 @@ test("generatePattern exposes logic blocks metadata", function () {
   assert.ok(pattern.generationMeta.blocks.length >= 1);
   assert.ok(pattern.generationMeta.blocks[0].melodicCellId);
 });
+
+
+test("flattenPhraseSequence respects frozen blocks after motif changes", function () {
+  const scale = core.createScaleDefinition(0, "ionian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const patternA = core.createEmptyPattern({ name: "A", grid: 4 });
+  core.upsertNote(patternA, 0, 60, { durationSteps: 1 });
+  const motif = core.createMotifFromPattern(patternA, { name: "Motif A", tags: ["test"] });
+  const sequence = core.createEmptyPhraseSequence();
+  core.addMotifToPhrase(sequence, motif);
+  sequence.blocks[0].relationMode = "frozen";
+  sequence.blocks[0].frozenPattern = core.deepClone(motif.sourcePattern);
+
+  const patternB = core.createEmptyPattern({ name: "B", grid: 4 });
+  core.upsertNote(patternB, 0, 67, { durationSteps: 1 });
+  motif.sourcePattern = patternB;
+
+  const flattened = core.flattenPhraseSequence(sequence, [motif], scale, instrument);
+  const midi = core.pitchSpecToMidi(flattened.notes[0].pitch);
+  assert.equal(midi, 60);
+});
+
+
+test("cadence target option can force third endings", function () {
+  const scale = core.createScaleDefinition(0, "ionian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const source = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.55,
+    maxLeap: 5,
+    repeatRate: 0.35,
+    surprise: 0.18,
+    tensionCurve: "rise",
+    mode: "new",
+  });
+  const cadence = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    sourcePattern: source,
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.35,
+    maxLeap: 4,
+    repeatRate: 0.2,
+    surprise: 0.08,
+    tensionCurve: "fall",
+    mode: "cadence",
+    cadenceTarget: "third",
+  });
+
+  const lastMidi = core.pitchSpecToMidi(cadence.notes[cadence.notes.length - 1].pitch);
+  const lastPc = core.normalizePc(lastMidi);
+  assert.equal(lastPc, core.normalizePc(scale.rootPc + 4));
+});

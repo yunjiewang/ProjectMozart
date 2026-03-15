@@ -145,7 +145,7 @@
         <section class="panel meadow-panel generator-panel">
           <div class="panel-title-row">
             <h2>Generator Forge</h2>
-            <span class="panel-tag">规则 + 可控随机</span>
+            <span id="generatorSelectionLabel" class="panel-tag">规则 + 可控随机</span>
           </div>
 
           <div class="grid-form">
@@ -209,6 +209,11 @@
               <span>惊喜分区</span>
               <select id="generationSurpriseZoneSelect"></select>
             </label>
+
+            <label class="control" id="generationCadenceTargetControl">
+              <span>Cadence 目标</span>
+              <select id="generationCadenceTargetSelect"></select>
+            </label>
           </div>
 
           <div class="button-row">
@@ -223,6 +228,15 @@
               <span>Generator Preset</span>
               <select id="generatorPresetSelect"></select>
             </label>
+            <label class="control compact">
+              <span>搜索 Preset</span>
+              <input id="generatorPresetSearchInput" type="search" placeholder="名称 / 标签 / 备注" />
+            </label>
+            <label class="control compact">
+              <span>标签筛选</span>
+              <select id="generatorPresetTagFilter"></select>
+            </label>
+            <div id="generatorPresetQuickTags" class="quick-tag-chips"></div>
             <div class="button-row compact-actions">
               <button id="saveGeneratorPresetBtn" type="button">Save Current</button>
               <button id="applyGeneratorPresetBtn" type="button">Apply</button>
@@ -239,10 +253,17 @@
           <p id="generatorPresetSummary" class="generator-preset-summary"></p>
           <p id="generatorPresetNotes" class="generator-preset-summary"></p>
           <p id="generatorPresetDiff" class="generator-preset-summary"></p>
+          <p id="generatorSelectionStatus" class="generator-preset-summary"></p>
 
           <div class="generator-notes">
             <strong>当前策略</strong>
             <p id="generationSummary"></p>
+            <div class="inline-hint-actions">
+              <label class="control compact"><span>始终显示模式提示</span><input id="alwaysShowModeHintsInput" type="checkbox" /></label>
+              <label class="control compact"><span>本会话不再显示</span><input id="muteModeHintsSessionInput" type="checkbox" /></label>
+              <button id="dismissModeHintBtn" type="button" class="ghost-button">暂时隐藏提示</button>
+            </div>
+            <p id="generationModeHint" class="generator-preset-summary"></p>
           </div>
 
           <div class="generator-notes">
@@ -339,6 +360,7 @@
           <div class="phrase-stage">
             <div class="panel-title-row mini">
               <h3>Phrase Builder</h3>
+              <span id="phraseSelectionLabel" class="panel-tag">未选择 block</span>
               <div class="button-row compact-actions">
                 <label class="control compact">
                   <span>Loop 次数</span>
@@ -485,6 +507,7 @@
           <button data-action="play">试听</button>
           <button data-action="load">载入</button>
           <button data-action="phrase">加入 Phrase</button>
+          <button data-action="seed-generator">桥接到 Generator</button>
           <button data-action="transpose">+2</button>
           <button data-action="answer">收尾句</button>
           <button data-action="duplicate">复制</button>
@@ -501,7 +524,7 @@
           <span class="phrase-drag-hint">Drag · Alt+Drag To Copy</span>
         </div>
         <p class="phrase-block-meta"></p>
-        <div class="phrase-drop-hint">拖到别的位置重排；按住 Alt 拖拽会复制一份。</div>
+        <div class="phrase-drop-hint">拖到别的位置重排；按住 Alt 拖拽会复制一份。移动端可点下方 Drop To Insert 槽位定位插入。</div>
         <div class="phrase-lanes">
           <div class="phrase-lane">
             <strong class="phrase-lane-label">源 Motif</strong>
@@ -523,6 +546,8 @@
           <button data-action="play-source">试听源</button>
           <button data-action="play-block">试听块</button>
           <button data-action="load-block">载入块</button>
+          <button data-action="toggle-mode">切换为 Frozen</button>
+          <button data-action="refresh-frozen">刷新 Frozen</button>
         </div>
         <div class="button-row compact-actions">
           <button data-action="diatonic-down">顺阶 -1</button>
