@@ -10,6 +10,13 @@
   const interactionState = {
     checkpoints: {},
     phraseDrag: null,
+    phraseDragAutoScrollRAF: null,
+    phraseDragAutoScrollSpeed: 0,
+    phraseDragAutoScrollSpeedX: 0,
+    lastGeneratorMode: null,
+    generatorModeHintUntil: 0,
+    dismissGeneratorModeHint: false,
+    muteGeneratorModeHintsSession: false,
   };
   const GENERATION_MODE_LABELS = {
     new: "新 Motif",
@@ -88,6 +95,13 @@
     opening: "起句点火",
     minimal: "尽量克制",
   };
+  const GENERATION_CADENCE_TARGET_LABELS = {
+    auto: "自动（主音/五度）",
+    root: "主音",
+    third: "三度",
+    fifth: "五度",
+    color: "色彩音（二度/六度）",
+  };
   const MORPH_MODE_LABELS = {
     "a-heavy": "A-heavy",
     balanced: "Balanced",
@@ -137,7 +151,12 @@
     generationFormLockSelect: document.getElementById("generationFormLockSelect"),
     generationCellLockSelect: document.getElementById("generationCellLockSelect"),
     generationSurpriseZoneSelect: document.getElementById("generationSurpriseZoneSelect"),
+    generationCadenceTargetSelect: document.getElementById("generationCadenceTargetSelect"),
+    generationCadenceTargetControl: document.getElementById("generationCadenceTargetControl"),
     generatorPresetSelect: document.getElementById("generatorPresetSelect"),
+    generatorPresetSearchInput: document.getElementById("generatorPresetSearchInput"),
+    generatorPresetTagFilter: document.getElementById("generatorPresetTagFilter"),
+    generatorPresetQuickTags: document.getElementById("generatorPresetQuickTags"),
     saveGeneratorPresetBtn: document.getElementById("saveGeneratorPresetBtn"),
     applyGeneratorPresetBtn: document.getElementById("applyGeneratorPresetBtn"),
     duplicateGeneratorPresetBtn: document.getElementById("duplicateGeneratorPresetBtn"),
@@ -151,14 +170,20 @@
     generatorPresetSummary: document.getElementById("generatorPresetSummary"),
     generatorPresetNotes: document.getElementById("generatorPresetNotes"),
     generatorPresetDiff: document.getElementById("generatorPresetDiff"),
+    generatorSelectionStatus: document.getElementById("generatorSelectionStatus"),
     generateBtn: document.getElementById("generateBtn"),
     humanizeBtn: document.getElementById("humanizeBtn"),
     reversePatternBtn: document.getElementById("reversePatternBtn"),
     stretchPatternBtn: document.getElementById("stretchPatternBtn"),
     generationSummary: document.getElementById("generationSummary"),
+    generationModeHint: document.getElementById("generationModeHint"),
+    alwaysShowModeHintsInput: document.getElementById("alwaysShowModeHintsInput"),
+    dismissModeHintBtn: document.getElementById("dismissModeHintBtn"),
+    muteModeHintsSessionInput: document.getElementById("muteModeHintsSessionInput"),
     generationModePreview: document.getElementById("generationModePreview"),
     logicFormLabel: document.getElementById("logicFormLabel"),
     generationBlocks: document.getElementById("generationBlocks"),
+    generatorSelectionLabel: document.getElementById("generatorSelectionLabel"),
     duplicatePatternBtn: document.getElementById("duplicatePatternBtn"),
     clearPatternBtn: document.getElementById("clearPatternBtn"),
     saveMotifBtn: document.getElementById("saveMotifBtn"),
@@ -221,6 +246,7 @@
     historyCount: document.getElementById("historyCount"),
     historyList: document.getElementById("historyList"),
     phraseInspector: document.getElementById("phraseInspector"),
+    phraseSelectionLabel: document.getElementById("phraseSelectionLabel"),
     motifSearchInput: document.getElementById("motifSearchInput"),
   };
 
@@ -276,6 +302,7 @@
         preferredFormId: "auto",
         preferredCellId: "auto",
         surpriseZone: "auto",
+        cadenceTarget: "auto",
       },
       generatorPresets: [
         {
@@ -283,6 +310,7 @@
           name: "Organic Dorian Builder",
           pinned: true,
           notes: "Balanced default for organic single-line exploration.",
+          tags: ["build", "dorian", "organic"],
           instrumentId: instrument.id,
           scale: core.deepClone(scale),
           generator: {
@@ -295,10 +323,15 @@
             preferredFormId: "auto",
             preferredCellId: "auto",
             surpriseZone: "auto",
+            cadenceTarget: "auto",
           },
         },
       ],
       selectedGeneratorPresetId: null,
+      generatorPresetSearch: "",
+      generatorPresetTagFilter: "all",
+      generatorBridgeHint: "",
+      alwaysShowModeHints: false,
       history: [],
       motifSearch: "",
       motifFilters: {
@@ -345,6 +378,10 @@
       inputState && inputState.selectedGeneratorPresetId ? inputState.selectedGeneratorPresetId : base.selectedGeneratorPresetId,
       next.generatorPresets
     );
+    next.generatorPresetSearch = typeof (inputState && inputState.generatorPresetSearch) === "string" ? inputState.generatorPresetSearch : "";
+    next.generatorPresetTagFilter = typeof (inputState && inputState.generatorPresetTagFilter) === "string" ? inputState.generatorPresetTagFilter : "all";
+    next.generatorBridgeHint = typeof (inputState && inputState.generatorBridgeHint) === "string" ? inputState.generatorBridgeHint : "";
+    next.alwaysShowModeHints = Boolean(inputState && inputState.alwaysShowModeHints);
     next.undoStack = [];
     next.redoStack = [];
     next.phraseLoopCount = Number(inputState && inputState.phraseLoopCount) || base.phraseLoopCount;
@@ -390,7 +427,15 @@
   }
 
   function normalizePhraseBlock(block) {
+    const relationMode = block && (block.relationMode === "frozen" || block.relationMode === "reference")
+      ? block.relationMode
+      : "reference";
+    const frozenPattern = block && block.frozenPattern && Array.isArray(block.frozenPattern.notes)
+      ? core.deepClone(block.frozenPattern)
+      : null;
     return Object.assign({}, block, {
+      relationMode: relationMode,
+      frozenPattern: frozenPattern,
       transform: normalizePhraseTransform(block && block.transform),
     });
   }
@@ -410,6 +455,48 @@
     };
   }
 
+  function normalizePresetTags(tags) {
+    if (!Array.isArray(tags)) {
+      return [];
+    }
+    return Array.from(new Set(tags
+      .map(function (tag) {
+        return String(tag || "").trim().toLowerCase();
+      })
+      .filter(Boolean)));
+  }
+
+  function derivePresetTagsFromState() {
+    const modeTag = state.generator && state.generator.mode ? state.generator.mode : "new";
+    const modeName = state.scale && state.scale.modeName ? state.scale.modeName : "";
+    return normalizePresetTags([modeTag, modeName]);
+  }
+
+  function getGeneratorPresetTagOptions() {
+    return Array.from(new Set(state.generatorPresets
+      .reduce(function (all, preset) {
+        return all.concat(Array.isArray(preset.tags) ? preset.tags : []);
+      }, [])))
+      .sort();
+  }
+
+  function getVisibleGeneratorPresets() {
+    const query = (state.generatorPresetSearch || "").trim().toLowerCase();
+    const tagFilter = state.generatorPresetTagFilter || "all";
+    return state.generatorPresets.filter(function (preset) {
+      const tags = Array.isArray(preset.tags) ? preset.tags : [];
+      const matchesTag = tagFilter === "all" || tags.includes(tagFilter);
+      if (!matchesTag) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = [preset.name, preset.notes, tags.join(" ")].join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+
   function normalizeGeneratorPreset(preset) {
     if (!preset || !preset.generator || !preset.scale) {
       return null;
@@ -419,6 +506,7 @@
       name: preset.name || "Generator Preset",
       pinned: Boolean(preset.pinned),
       notes: typeof preset.notes === "string" ? preset.notes : "",
+      tags: normalizePresetTags(preset.tags),
       instrumentId: preset.instrumentId || null,
       scale: core.deepClone(preset.scale),
       generator: Object.assign(
@@ -432,6 +520,7 @@
           preferredFormId: "auto",
           preferredCellId: "auto",
           surpriseZone: "auto",
+          cadenceTarget: "auto",
         },
         preset.generator
       ),
@@ -1199,14 +1288,64 @@
     return value > 0 ? "+" + value : String(value);
   }
 
-  function buildPhraseBlockPattern(block) {
+  function getPhraseBlockSourcePattern(block) {
+    const motif = state.motifLibrary.find(function (item) {
+      return item.id === block.motifId;
+    }) || null;
+    if (block.relationMode === "frozen" && block.frozenPattern && Array.isArray(block.frozenPattern.notes)) {
+      return {
+        pattern: core.deepClone(block.frozenPattern),
+        motif: motif,
+      };
+    }
+    if (!motif) {
+      return {
+        pattern: null,
+        motif: null,
+      };
+    }
+    return {
+      pattern: core.deepClone(motif.sourcePattern),
+      motif: motif,
+    };
+  }
+
+  function setPhraseBlockRelationMode(block, mode) {
+    if (!block) {
+      return;
+    }
+    if (mode === "frozen") {
+      const source = getPhraseBlockSourcePattern(Object.assign({}, block, { relationMode: "reference" }));
+      if (!source.pattern) {
+        return;
+      }
+      block.relationMode = "frozen";
+      block.frozenPattern = core.deepClone(source.pattern);
+      return;
+    }
+    block.relationMode = "reference";
+    block.frozenPattern = null;
+  }
+
+  function refreshFrozenPhraseBlock(block) {
+    if (!block || block.relationMode !== "frozen") {
+      return;
+    }
     const motif = state.motifLibrary.find(function (item) {
       return item.id === block.motifId;
     });
     if (!motif) {
+      return;
+    }
+    block.frozenPattern = core.deepClone(motif.sourcePattern);
+  }
+
+  function buildPhraseBlockPattern(block) {
+    const source = getPhraseBlockSourcePattern(block);
+    if (!source.pattern) {
       return null;
     }
-    return core.transformPattern(motif.sourcePattern, block.transform, currentScale(), currentInstrument());
+    return core.transformPattern(source.pattern, block.transform, currentScale(), currentInstrument());
   }
 
   function renderMiniRoll(target, pattern, options) {
@@ -1356,22 +1495,62 @@
     elements.motifDifficultyFilter.value = state.motifFilters.difficulty;
   }
 
+  function renderGeneratorPresetQuickTags(tagOptions) {
+    const tags = ["all"].concat(tagOptions || []);
+    elements.generatorPresetQuickTags.innerHTML = tags
+      .map(function (tag) {
+        const active = (state.generatorPresetTagFilter || "all") === tag;
+        const label = tag === "all" ? "全部" : ("#" + tag);
+        return '<button type="button" class="quick-tag-chip' + (active ? ' active' : '') + '" data-tag="' + tag + '">' + label + '</button>';
+      })
+      .join('');
+    elements.generatorPresetQuickTags.querySelectorAll('button').forEach(function (button) {
+      button.addEventListener('click', function () {
+        state.generatorPresetTagFilter = button.getAttribute('data-tag') || 'all';
+        render();
+      });
+    });
+  }
+
   function hydrateGeneratorPresetControls() {
-    elements.generatorPresetSelect.innerHTML = state.generatorPresets.length
-      ? state.generatorPresets
+    const visiblePresets = getVisibleGeneratorPresets();
+    const tagOptions = getGeneratorPresetTagOptions();
+    elements.generatorPresetTagFilter.innerHTML =
+      '<option value="all">All Tags</option>' +
+      tagOptions
+        .map(function (tag) {
+          return '<option value="' + tag + '">' + tag + '</option>';
+        })
+        .join('');
+    elements.generatorPresetTagFilter.value = tagOptions.includes(state.generatorPresetTagFilter)
+      ? state.generatorPresetTagFilter
+      : 'all';
+    state.generatorPresetTagFilter = elements.generatorPresetTagFilter.value;
+    elements.generatorPresetSearchInput.value = state.generatorPresetSearch || "";
+    renderGeneratorPresetQuickTags(tagOptions);
+
+    elements.generatorPresetSelect.innerHTML = visiblePresets.length
+      ? visiblePresets
           .map(function (preset) {
-            return '<option value="' + preset.id + '">' + (preset.pinned ? "★ " : "") + preset.name + "</option>";
+            const tags = Array.isArray(preset.tags) && preset.tags.length ? ' · #' + preset.tags.join(' #') : '';
+            return '<option value="' + preset.id + '">' + (preset.pinned ? "★ " : "") + preset.name + tags + "</option>";
           })
           .join("")
-      : '<option value="">No presets yet</option>';
-    elements.generatorPresetSelect.value = state.selectedGeneratorPresetId || (state.generatorPresets[0] ? state.generatorPresets[0].id : "");
-    elements.applyGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.duplicateGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.editGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.pinGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.overwriteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.deleteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
-    elements.exportGeneratorPresetsBtn.disabled = state.generatorPresets.length === 0;
+      : '<option value="">No matching presets</option>';
+    const selectedVisible = visiblePresets.some(function (preset) { return preset.id === state.selectedGeneratorPresetId; });
+    state.selectedGeneratorPresetId = selectedVisible
+      ? state.selectedGeneratorPresetId
+      : (visiblePresets[0] ? visiblePresets[0].id : normalizeGeneratorPresetId(state.selectedGeneratorPresetId, state.generatorPresets));
+    elements.generatorPresetSelect.value = state.selectedGeneratorPresetId || "";
+    const hasAnyPresets = state.generatorPresets.length > 0;
+    const hasVisiblePresets = visiblePresets.length > 0;
+    elements.applyGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.duplicateGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.editGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.pinGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.overwriteGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.deleteGeneratorPresetBtn.disabled = !hasVisiblePresets;
+    elements.exportGeneratorPresetsBtn.disabled = !hasAnyPresets;
     const preset = getSelectedGeneratorPreset();
     elements.pinGeneratorPresetBtn.textContent = preset && preset.pinned ? "Unpin" : "Pin";
   }
@@ -1382,6 +1561,7 @@
       name: name || "Generator Preset",
       pinned: false,
       notes: "",
+      tags: derivePresetTagsFromState(),
       instrumentId: state.instrumentId,
       scale: core.deepClone(state.scale),
       generator: core.deepClone(state.generator),
@@ -1447,6 +1627,7 @@
       ["preferredFormId", "Form"],
       ["preferredCellId", "Cell"],
       ["surpriseZone", "Surprise Zone"],
+      ["cadenceTarget", "Cadence Target"],
     ].forEach(function (pair) {
       const key = pair[0];
       const label = pair[1];
@@ -1592,6 +1773,11 @@
         return '<option value="' + zoneId + '">' + GENERATION_SURPRISE_ZONE_LABELS[zoneId] + "</option>";
       })
       .join("");
+    elements.generationCadenceTargetSelect.innerHTML = Object.keys(GENERATION_CADENCE_TARGET_LABELS)
+      .map(function (targetId) {
+        return '<option value="' + targetId + '">' + GENERATION_CADENCE_TARGET_LABELS[targetId] + "</option>";
+      })
+      .join("");
 
     elements.signatureSelect.value = state.pattern.numerator + "/" + state.pattern.denominator;
     elements.gridSelect.value = String(state.pattern.grid);
@@ -1608,14 +1794,37 @@
     elements.generationFormLockSelect.value = state.generator.preferredFormId || "auto";
     elements.generationCellLockSelect.value = state.generator.preferredCellId || "auto";
     elements.generationSurpriseZoneSelect.value = state.generator.surpriseZone || "auto";
+    elements.generationCadenceTargetSelect.value = state.generator.cadenceTarget || "auto";
+    updateGeneratorModeConditionalControls();
     elements.motifSearchInput.value = state.motifSearch || "";
     hydrateMotifFilterControls();
     hydrateGeneratorPresetControls();
+
+    elements.alwaysShowModeHintsInput.checked = Boolean(state.alwaysShowModeHints);
+    elements.muteModeHintsSessionInput.checked = Boolean(interactionState.muteGeneratorModeHintsSession);
 
     elements.practiceModeSelect.value = state.practice.mode;
     elements.practiceDifficultyInput.value = String(state.practice.difficulty);
     elements.practiceLoopsInput.value = String(state.practice.loops);
     elements.practiceTempoLiftInput.value = String(state.practice.tempoLift);
+  }
+
+
+  function updateGeneratorModeConditionalControls() {
+    const showCadenceTarget = state.generator.mode === "cadence";
+    if (elements.generationCadenceTargetControl) {
+      elements.generationCadenceTargetControl.classList.toggle("hidden", !showCadenceTarget);
+    }
+    elements.generationCadenceTargetSelect.disabled = !showCadenceTarget;
+  }
+
+  function buildGeneratorModeContextHint(mode) {
+    const cadenceVisibility = mode === "cadence"
+      ? "Cadence 目标已显示，可指定落点音级。"
+      : "Cadence 目标已隐藏，避免非终止模式干扰。";
+    const preview = GENERATION_MODE_PREVIEWS[mode] || null;
+    const tagline = preview ? preview.tagline : "";
+    return (tagline ? tagline + " · " : "") + cadenceVisibility;
   }
 
   function bindEvents() {
@@ -1630,6 +1839,21 @@
     registerInteractiveCheckpoint(elements.practiceDifficultyInput, "practice-difficulty", "Adjust practice difficulty");
     registerInteractiveCheckpoint(elements.practiceLoopsInput, "practice-loops", "Adjust practice loops");
     registerInteractiveCheckpoint(elements.practiceTempoLiftInput, "practice-tempo-lift", "Adjust practice tempo lift");
+
+    elements.alwaysShowModeHintsInput.addEventListener("change", function () {
+      state.alwaysShowModeHints = elements.alwaysShowModeHintsInput.checked;
+      render();
+    });
+
+    elements.dismissModeHintBtn.addEventListener("click", function () {
+      interactionState.dismissGeneratorModeHint = true;
+      render();
+    });
+
+    elements.muteModeHintsSessionInput.addEventListener("change", function () {
+      interactionState.muteGeneratorModeHintsSession = elements.muteModeHintsSessionInput.checked;
+      render();
+    });
 
     elements.viewMode.addEventListener("change", function () {
       state.viewMode = elements.viewMode.value;
@@ -1706,8 +1930,19 @@
     elements.generationFormLockSelect.addEventListener("change", syncGeneratorSettings);
     elements.generationCellLockSelect.addEventListener("change", syncGeneratorSettings);
     elements.generationSurpriseZoneSelect.addEventListener("change", syncGeneratorSettings);
+    elements.generationCadenceTargetSelect.addEventListener("change", syncGeneratorSettings);
     elements.generatorPresetSelect.addEventListener("change", function () {
       state.selectedGeneratorPresetId = elements.generatorPresetSelect.value || null;
+      render();
+    });
+    elements.generatorPresetSearchInput.addEventListener("input", function () {
+      state.generatorPresetSearch = elements.generatorPresetSearchInput.value;
+      hydrateGeneratorPresetControls();
+      render();
+    });
+    elements.generatorPresetTagFilter.addEventListener("change", function () {
+      state.generatorPresetTagFilter = elements.generatorPresetTagFilter.value;
+      hydrateGeneratorPresetControls();
       render();
     });
     elements.saveGeneratorPresetBtn.addEventListener("click", function () {
@@ -1769,10 +2004,18 @@
       if (nextNotes == null) {
         return;
       }
+      const nextTags = window.prompt(
+        "Preset tags (comma separated)",
+        (preset.tags || []).join(", ")
+      );
+      if (nextTags == null) {
+        return;
+      }
       recordCheckpoint("Edit generator preset");
       updateGeneratorPreset(preset.id, function (candidate) {
         candidate.name = nextName.trim() || candidate.name;
         candidate.notes = nextNotes.trim();
+        candidate.tags = normalizePresetTags(nextTags.split(","));
         return candidate;
       });
       hydrateControls();
@@ -1865,6 +2108,7 @@
         preferredFormId: state.generator.preferredFormId,
         preferredCellId: state.generator.preferredCellId,
         surpriseZone: state.generator.surpriseZone,
+        cadenceTarget: state.generator.cadenceTarget,
       });
       pushHistory(state.pattern, "Generate");
       state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
@@ -2065,7 +2309,8 @@
       state.generator.mode !== elements.generationModeSelect.value ||
       state.generator.preferredFormId !== elements.generationFormLockSelect.value ||
       state.generator.preferredCellId !== elements.generationCellLockSelect.value ||
-      state.generator.surpriseZone !== elements.generationSurpriseZoneSelect.value
+      state.generator.surpriseZone !== elements.generationSurpriseZoneSelect.value ||
+      state.generator.cadenceTarget !== elements.generationCadenceTargetSelect.value
     ) {
       recordCheckpoint("Change generator mode");
     }
@@ -2078,6 +2323,7 @@
     state.generator.preferredFormId = elements.generationFormLockSelect.value;
     state.generator.preferredCellId = elements.generationCellLockSelect.value;
     state.generator.surpriseZone = elements.generationSurpriseZoneSelect.value;
+    state.generator.cadenceTarget = elements.generationCadenceTargetSelect.value;
     render();
   }
 
@@ -2092,6 +2338,7 @@
   function render() {
     elements.composeView.classList.toggle("hidden", state.viewMode !== "compose");
     elements.practiceView.classList.toggle("hidden", state.viewMode !== "practice");
+    updateGeneratorModeConditionalControls();
 
     elements.bpmValue.textContent = state.bpm + " BPM";
     elements.densityValue.textContent = state.generator.density.toFixed(2);
@@ -2118,6 +2365,22 @@
       " " +
       state.scale.modeName;
 
+    if (interactionState.lastGeneratorMode !== state.generator.mode) {
+      interactionState.lastGeneratorMode = state.generator.mode;
+      interactionState.generatorModeHintUntil = Date.now() + 7000;
+      interactionState.dismissGeneratorModeHint = false;
+    }
+    const showModeHint = !interactionState.dismissGeneratorModeHint &&
+      !interactionState.muteGeneratorModeHintsSession && (
+        state.alwaysShowModeHints || Date.now() < interactionState.generatorModeHintUntil
+      );
+    elements.generationModeHint.textContent = showModeHint
+      ? ("Mode Hint: " + buildGeneratorModeContextHint(state.generator.mode))
+      : "";
+    elements.dismissModeHintBtn.classList.toggle("hidden", !showModeHint);
+    elements.dismissModeHintBtn.disabled = !showModeHint;
+    elements.muteModeHintsSessionInput.checked = Boolean(interactionState.muteGeneratorModeHintsSession);
+
     elements.generationSummary.textContent =
       "密度 " +
       state.generator.density.toFixed(2) +
@@ -2134,7 +2397,12 @@
       " / Cell " +
       (GENERATION_CELL_LABELS[state.generator.preferredCellId] || "自动") +
       " / Surprise " +
-      (GENERATION_SURPRISE_ZONE_LABELS[state.generator.surpriseZone] || "自动");
+      (GENERATION_SURPRISE_ZONE_LABELS[state.generator.surpriseZone] || "自动") +
+      (state.generator.mode === "cadence"
+        ? (" / Cadence " +
+          (GENERATION_CADENCE_TARGET_LABELS[state.generator.cadenceTarget] || "自动（主音/五度）"))
+        : "") +
+      (state.generatorBridgeHint ? " | " + state.generatorBridgeHint : "");
     const selectedPreset = getSelectedGeneratorPreset();
     elements.generatorPresetSummary.textContent = selectedPreset
       ? "Preset: " +
@@ -2145,7 +2413,8 @@
         " " +
         selectedPreset.scale.modeName +
         " | " +
-        (GENERATION_MODE_LABELS[selectedPreset.generator.mode] || selectedPreset.generator.mode)
+        (GENERATION_MODE_LABELS[selectedPreset.generator.mode] || selectedPreset.generator.mode) +
+        ((selectedPreset.tags && selectedPreset.tags.length) ? " | #" + selectedPreset.tags.join(" #") : "")
       : "Preset: none yet. Save the current generator setup to reuse it later.";
     elements.generatorPresetNotes.textContent = selectedPreset
       ? (selectedPreset.notes
@@ -2156,8 +2425,17 @@
     elements.generatorPresetDiff.textContent = selectedPreset
       ? (presetDiff.length
         ? "Current differs from preset in: " + presetDiff.join(" | ")
-        : "Current matches the selected preset.")
-      : "";
+        : "Current matches the selected preset.") +
+        " · Showing " + getVisibleGeneratorPresets().length + "/" + state.generatorPresets.length + " presets"
+      : (state.generatorPresets.length
+        ? "No preset matches current search/filter."
+        : "");
+    elements.generatorSelectionStatus.textContent = "当前 Preset: " +
+      (selectedPreset ? selectedPreset.name : "未选择") +
+      " · 标签筛选: " + (state.generatorPresetTagFilter === "all" ? "全部" : ("#" + state.generatorPresetTagFilter));
+    elements.generatorSelectionLabel.textContent = selectedPreset
+      ? ("Preset " + selectedPreset.name)
+      : "规则 + 可控随机";
 
     renderGenerationModePreview();
     renderGenerationBlocks();
@@ -2266,6 +2544,12 @@
         return note.pitch.pc;
       })
     );
+    const selection = normalizePhraseSelection(state.phraseSelection, state.phrase.blocks.length);
+    elements.phraseSelectionLabel.textContent = selection.start == null
+      ? "未选择 block"
+      : (selection.start === selection.end
+        ? ("选中 Block #" + (selection.start + 1))
+        : ("选中 Block #" + (selection.start + 1) + "-#" + (selection.end + 1)));
     const metrics = [
       { label: "Blocks", value: state.phrase.blocks.length },
       { label: "Steps", value: phrasePattern.grid },
@@ -2468,6 +2752,63 @@
     elements.noteOffsetValue.textContent = String(note.pitch.offsetCents || 0);
   }
 
+  function bridgeMotifToGenerator(motif) {
+    if (!motif) {
+      return null;
+    }
+    const tags = (motif.tags || []).map(function (tag) {
+      return String(tag || "").trim().toLowerCase();
+    });
+    const hasTag = function (name) {
+      return tags.includes(name);
+    };
+    const next = {
+      mode: state.generator.mode,
+      preferredFormId: "auto",
+      preferredCellId: "auto",
+      surpriseZone: "balanced",
+      tensionCurve: state.generator.tensionCurve,
+      cadenceTarget: "auto",
+      density: core.clamp(0.45 + motif.difficulty * 0.08, 0.2, 0.85),
+      maxLeap: core.clamp(7 - motif.difficulty, 2, 7),
+      repeatRate: core.clamp(0.62 - motif.difficulty * 0.08, 0.2, 0.7),
+      surprise: core.clamp(0.12 + motif.difficulty * 0.05, 0.05, 0.45),
+    };
+
+    if (hasTag("tail") || hasTag("cadence") || motif.style === "tail") {
+      next.mode = hasTag("cadence") ? "cadence" : "tail";
+      next.preferredFormId = hasTag("cadence") ? "approach-cadence" : "release-tail";
+      next.preferredCellId = "release-turn";
+      next.surpriseZone = "ending";
+      next.tensionCurve = "fall";
+      next.cadenceTarget = hasTag("cadence") ? "root" : "auto";
+    } else if (hasTag("sequence") || hasTag("continuation")) {
+      next.mode = hasTag("continuation") ? "continuation" : "variation";
+      next.preferredFormId = "statement-sequence-release";
+      next.preferredCellId = "skip-sequence";
+      next.surpriseZone = "middle";
+      next.tensionCurve = "wave";
+    } else if (hasTag("answer") || hasTag("response")) {
+      next.mode = "response";
+      next.preferredFormId = "echo-answer";
+      next.preferredCellId = "answer-fall";
+      next.surpriseZone = "middle";
+      next.tensionCurve = "fall";
+    } else {
+      next.mode = "new";
+      next.preferredFormId = "a-b-release";
+      next.preferredCellId = "arc-return";
+      next.surpriseZone = hasTag("fusion") ? "opening" : "balanced";
+      next.tensionCurve = hasTag("fusion") ? "rise" : "arc";
+    }
+
+    state.generator = Object.assign({}, state.generator, next);
+    state.generatorBridgeHint = "Seeded by motif “" + motif.name + "” · Form " +
+      (GENERATION_FORM_LABELS[next.preferredFormId] || "自动") + " · Cell " +
+      (GENERATION_CELL_LABELS[next.preferredCellId] || "自动");
+    return next;
+  }
+
   function renderMotifLibrary() {
     const query = (state.motifSearch || "").trim().toLowerCase();
     const filters = normalizeMotifFilters(state.motifFilters);
@@ -2537,6 +2878,10 @@
           } else if (action === "phrase") {
             recordCheckpoint("Add motif to phrase");
             core.addMotifToPhrase(state.phrase, motif);
+          } else if (action === "seed-generator") {
+            recordCheckpoint("Seed generator from motif");
+            bridgeMotifToGenerator(motif);
+            hydrateControls();
           } else if (action === "transpose") {
             recordCheckpoint("Create transposed motif");
             const transposed = core.createMotifFromPattern(
@@ -2597,7 +2942,7 @@
             recordCheckpoint("Edit motif");
             motif.name = nextName.trim() || motif.name;
             state.phrase.blocks.forEach(function (block) {
-              if (block.motifId === motif.id) {
+              if (block.motifId === motif.id && block.relationMode !== "frozen") {
                 block.motifName = motif.name;
               }
             });
@@ -2619,7 +2964,15 @@
               return entry.id !== motif.id;
             });
             state.phrase.blocks = state.phrase.blocks.filter(function (block) {
-              return block.motifId !== motif.id;
+              return block.motifId !== motif.id || block.relationMode === "frozen";
+            }).map(function (block) {
+              if (block.motifId === motif.id && block.relationMode === "frozen") {
+                return Object.assign({}, block, {
+                  motifName: block.motifName || motif.name,
+                  motifId: null,
+                });
+              }
+              return block;
             });
           }
           render();
@@ -2634,17 +2987,162 @@
     }
   }
 
+  function stopPhraseDragAutoScroll() {
+    interactionState.phraseDragAutoScrollSpeed = 0;
+    interactionState.phraseDragAutoScrollSpeedX = 0;
+    if (interactionState.phraseDragAutoScrollRAF != null) {
+      window.cancelAnimationFrame(interactionState.phraseDragAutoScrollRAF);
+      interactionState.phraseDragAutoScrollRAF = null;
+    }
+  }
+
+  function ensurePhraseDragAutoScrollLoop() {
+    if (interactionState.phraseDragAutoScrollRAF != null) {
+      return;
+    }
+    const tick = function () {
+      if (!interactionState.phraseDrag || (interactionState.phraseDragAutoScrollSpeed === 0 && interactionState.phraseDragAutoScrollSpeedX === 0)) {
+        interactionState.phraseDragAutoScrollRAF = null;
+        return;
+      }
+      if (interactionState.phraseDragAutoScrollSpeed !== 0) {
+        window.scrollBy(0, interactionState.phraseDragAutoScrollSpeed);
+      }
+      if (interactionState.phraseDragAutoScrollSpeedX !== 0 && elements.phraseTimeline) {
+        elements.phraseTimeline.scrollLeft += interactionState.phraseDragAutoScrollSpeedX;
+      }
+      interactionState.phraseDragAutoScrollRAF = window.requestAnimationFrame(tick);
+    };
+    interactionState.phraseDragAutoScrollRAF = window.requestAnimationFrame(tick);
+  }
+
+  function updatePhraseDragAutoScroll(clientX, clientY) {
+    const edgeThreshold = 80;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const topDistance = Math.max(0, clientY);
+    const bottomDistance = Math.max(0, viewportHeight - clientY);
+    let speed = 0;
+    if (topDistance < edgeThreshold) {
+      speed = -core.clamp(Math.ceil((edgeThreshold - topDistance) / 10), 2, 12);
+    } else if (bottomDistance < edgeThreshold) {
+      speed = core.clamp(Math.ceil((edgeThreshold - bottomDistance) / 10), 2, 12);
+    }
+    interactionState.phraseDragAutoScrollSpeed = speed;
+
+    let speedX = 0;
+    if (elements.phraseTimeline) {
+      const rect = elements.phraseTimeline.getBoundingClientRect();
+      if (elements.phraseTimeline.scrollWidth > elements.phraseTimeline.clientWidth + 4) {
+        const leftDistance = Math.max(0, clientX - rect.left);
+        const rightDistance = Math.max(0, rect.right - clientX);
+        if (leftDistance < edgeThreshold) {
+          speedX = -core.clamp(Math.ceil((edgeThreshold - leftDistance) / 10), 2, 12);
+        } else if (rightDistance < edgeThreshold) {
+          speedX = core.clamp(Math.ceil((edgeThreshold - rightDistance) / 10), 2, 12);
+        }
+      }
+    }
+    interactionState.phraseDragAutoScrollSpeedX = speedX;
+
+    if (speed === 0 && speedX === 0) {
+      stopPhraseDragAutoScroll();
+      return;
+    }
+    ensurePhraseDragAutoScrollLoop();
+  }
+
   function renderPhraseTimeline() {
+
     elements.phraseTimeline.innerHTML = "";
     const template = document.getElementById("phraseBlockTemplate");
     state.phraseSelection = normalizePhraseSelection(state.phraseSelection, state.phrase.blocks.length);
+    if (!state.phrase.blocks.length) {
+      elements.phraseTimeline.innerHTML =
+        '<article class="history-item phrase-empty-state"><h3 class="history-item-name">Phrase 还是空的</h3><p class="practice-item-meta">可从 Motif Library 点“加入 Phrase”，或先点击“生成旋律”再保存为 motif。</p></article>';
+      return;
+    }
+
+    function movePhraseBlockToIndex(blockIndex, insertIndex) {
+      const moved = state.phrase.blocks.splice(blockIndex, 1)[0];
+      if (!moved) {
+        return;
+      }
+      const targetIndex = blockIndex < insertIndex ? insertIndex - 1 : insertIndex;
+      state.phrase.blocks.splice(core.clamp(targetIndex, 0, state.phrase.blocks.length), 0, moved);
+    }
+
+    function appendPhraseDropSlot(insertIndex) {
+      const slot = document.createElement("div");
+      slot.className = "phrase-drop-slot";
+      slot.setAttribute("data-insert-index", String(insertIndex));
+      slot.textContent = "Drop To Insert";
+      slot.addEventListener("dragover", function (event) {
+        if (!interactionState.phraseDrag) {
+          return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = interactionState.phraseDrag.copy ? "copy" : "move";
+        }
+        updatePhraseDragAutoScroll(event.clientX, event.clientY);
+        clearPhraseDropTargets();
+        slot.classList.add("active");
+      });
+      slot.addEventListener("dragleave", function () {
+        slot.classList.remove("active");
+        stopPhraseDragAutoScroll();
+      });
+      slot.addEventListener("drop", function (event) {
+        if (!interactionState.phraseDrag) {
+          return;
+        }
+        event.preventDefault();
+        const dragState = interactionState.phraseDrag;
+        interactionState.phraseDrag = null;
+        stopPhraseDragAutoScroll();
+        clearPhraseDropTargets();
+        const dragged = state.phrase.blocks[dragState.index];
+        if (!dragged) {
+          render();
+          return;
+        }
+        recordCheckpoint(dragState.copy ? "Duplicate phrase block by drop slot" : "Reorder phrase blocks by drop slot");
+        if (dragState.copy) {
+          const clone = core.deepClone(dragged);
+          clone.id = core.createId("block");
+          state.phrase.blocks.splice(insertIndex, 0, clone);
+        } else {
+          movePhraseBlockToIndex(dragState.index, insertIndex);
+        }
+        render();
+      });
+      slot.addEventListener("click", function () {
+        if (interactionState.phraseDrag) {
+          return;
+        }
+        const selection = normalizePhraseSelection(state.phraseSelection, state.phrase.blocks.length);
+        if (selection.start == null || selection.end == null || selection.start !== selection.end) {
+          return;
+        }
+        if (selection.start === insertIndex || selection.start + 1 === insertIndex) {
+          return;
+        }
+        recordCheckpoint("Reorder phrase block by slot tap");
+        movePhraseBlockToIndex(selection.start, insertIndex);
+        state.phraseSelection = normalizePhraseSelection({ start: core.clamp(insertIndex - 1, 0, state.phrase.blocks.length - 1), end: core.clamp(insertIndex - 1, 0, state.phrase.blocks.length - 1) }, state.phrase.blocks.length);
+        render();
+      });
+      elements.phraseTimeline.appendChild(slot);
+    }
+
     let phraseOffset = 0;
+    appendPhraseDropSlot(0);
     state.phrase.blocks.forEach(function (block, index) {
       block.transform = normalizePhraseTransform(block.transform);
-      const motif = state.motifLibrary.find(function (item) {
-        return item.id === block.motifId;
-      });
-      const transformedPattern = motif ? buildPhraseBlockPattern(block) : null;
+      const sourceContext = getPhraseBlockSourcePattern(block);
+      const motif = sourceContext.motif;
+      const sourcePattern = sourceContext.pattern;
+      const transformedPattern = sourcePattern ? buildPhraseBlockPattern(block) : null;
       const blockOffset = phraseOffset;
       const item = template.content.firstElementChild.cloneNode(true);
       item.draggable = true;
@@ -2657,7 +3155,9 @@
       }
       item.querySelector(".phrase-block-name").textContent = motif ? motif.name : block.motifName;
       item.querySelector(".phrase-block-meta").textContent =
-        "顺阶 " +
+        "模式 " +
+        (block.relationMode === "frozen" ? "Frozen Copy" : "Reference Motif") +
+        " · 顺阶 " +
         (block.transform.diatonicShift >= 0 ? "+" : "") +
         block.transform.diatonicShift +
         " · 半音 " +
@@ -2667,10 +3167,10 @@
         (block.transform.reverse ? "yes" : "no") +
         " · stretch x" +
         block.transform.stretch;
-      item.querySelector('[data-role="source-preview"]').textContent = motif
-        ? core.previewPattern(motif.sourcePattern)
+      item.querySelector('[data-role="source-preview"]').textContent = sourcePattern
+        ? core.previewPattern(sourcePattern)
         : "原始 motif 已不存在";
-      renderMiniRoll(item.querySelector('[data-role="source-roll"]'), motif ? motif.sourcePattern : null, {
+      renderMiniRoll(item.querySelector('[data-role="source-roll"]'), sourcePattern, {
         ghost: true,
       });
       item.querySelector('[data-role="block-preview"]').textContent = transformedPattern
@@ -2702,6 +3202,14 @@
             })
           : null
       );
+      const toggleModeBtn = item.querySelector('[data-action="toggle-mode"]');
+      const refreshFrozenBtn = item.querySelector('[data-action="refresh-frozen"]');
+      if (toggleModeBtn) {
+        toggleModeBtn.textContent = block.relationMode === "frozen" ? "切换为 Reference" : "切换为 Frozen";
+      }
+      if (refreshFrozenBtn) {
+        refreshFrozenBtn.disabled = block.relationMode !== "frozen";
+      }
       item.querySelectorAll("button").forEach(function (button) {
         button.addEventListener("click", function () {
           const action = button.getAttribute("data-action");
@@ -2721,6 +3229,20 @@
             if (transformedPattern) {
               recordCheckpoint("Load phrase block");
               adoptPattern(transformedPattern);
+              render();
+            }
+            return;
+          }
+          if (action === "toggle-mode") {
+            recordCheckpoint("Toggle phrase block relation mode");
+            setPhraseBlockRelationMode(block, block.relationMode === "frozen" ? "reference" : "frozen");
+            render();
+            return;
+          }
+          if (action === "refresh-frozen") {
+            if (block.relationMode === "frozen") {
+              recordCheckpoint("Refresh frozen phrase block");
+              refreshFrozenPhraseBlock(block);
               render();
             }
             return;
@@ -2780,6 +3302,7 @@
           copy: !!event.altKey,
           side: "after",
         };
+        stopPhraseDragAutoScroll();
         item.classList.add("dragging");
         if (event.dataTransfer) {
           event.dataTransfer.effectAllowed = interactionState.phraseDrag.copy ? "copyMove" : "move";
@@ -2797,12 +3320,14 @@
         if (event.dataTransfer) {
           event.dataTransfer.dropEffect = interactionState.phraseDrag.copy ? "copy" : "move";
         }
+        updatePhraseDragAutoScroll(event.clientX, event.clientY);
         clearPhraseDropTargets();
         item.classList.add("drop-target");
         item.classList.add(side === "before" ? "drop-before" : "drop-after");
       });
       item.addEventListener("dragleave", function () {
         item.classList.remove("drop-target", "drop-before", "drop-after");
+        stopPhraseDragAutoScroll();
       });
       item.addEventListener("drop", function (event) {
         if (!interactionState.phraseDrag) {
@@ -2811,6 +3336,7 @@
         event.preventDefault();
         const dragState = interactionState.phraseDrag;
         interactionState.phraseDrag = null;
+        stopPhraseDragAutoScroll();
         clearPhraseDropTargets();
         if (dragState.index === index && !dragState.copy) {
           render();
@@ -2836,11 +3362,13 @@
       });
       item.addEventListener("dragend", function () {
         interactionState.phraseDrag = null;
+        stopPhraseDragAutoScroll();
         item.classList.remove("dragging", "drop-target", "drop-before", "drop-after");
         clearPhraseDropTargets();
       });
       elements.phraseTimeline.appendChild(item);
       phraseOffset += transformedPattern ? transformedPattern.grid : 0;
+      appendPhraseDropSlot(index + 1);
     });
 
     if (!state.phrase.blocks.length) {
@@ -2852,6 +3380,9 @@
   function clearPhraseDropTargets() {
     elements.phraseTimeline.querySelectorAll(".phrase-block").forEach(function (node) {
       node.classList.remove("drop-target", "drop-before", "drop-after");
+    });
+    elements.phraseTimeline.querySelectorAll(".phrase-drop-slot").forEach(function (node) {
+      node.classList.remove("active");
     });
   }
 
