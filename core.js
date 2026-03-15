@@ -58,6 +58,34 @@
       [4, 2, 2],
     ],
   };
+  const LOGIC_FORM_PRESETS = {
+    auto: null,
+    "a-b": ["A", "B"],
+    "a-b-release": ["A", "B", "Release"],
+    "a-a1-b-tag": ["A", "A'", "B", "Tag"],
+    "statement-sequence-release": ["Statement", "Sequence", "Release"],
+    "echo-answer": ["Echo", "Answer"],
+    "setup-answer-tag": ["Setup", "Answer", "Tag"],
+    "release-tail": ["Release", "Tail"],
+    "approach-cadence": ["Approach", "Cadence"],
+    cadence: ["Cadence"],
+  };
+  const SURPRISE_ZONE_PRESETS = {
+    auto: "auto",
+    balanced: "balanced",
+    middle: "middle",
+    ending: "ending",
+    opening: "opening",
+    minimal: "minimal",
+  };
+
+  function isResponseLikeMode(mode) {
+    return mode === "response" || mode === "tail" || mode === "cadence";
+  }
+
+  function isClosingMode(mode) {
+    return mode === "tail" || mode === "cadence";
+  }
 
   function createId(prefix) {
     return prefix + "-" + Math.random().toString(36).slice(2, 9);
@@ -289,22 +317,89 @@
 
   function pickMelodicCell(settings, mode) {
     const preferredPool = MELODIC_CELLS.filter(function (cell) {
-      if (mode !== "response" && settings.tensionCurve !== "fall" && cell.id === "answer-fall") {
+      if (!isResponseLikeMode(mode) && settings.tensionCurve !== "fall" && cell.id === "answer-fall") {
         return false;
       }
       return cell.preferred.indexOf(settings.tensionCurve) >= 0;
     });
-    const responsePool = mode === "response"
+    const responsePool = isResponseLikeMode(mode)
       ? preferredPool.filter(function (cell) {
-          return cell.id === "answer-fall" || cell.id === "arc-return";
+          return cell.id === "answer-fall" || cell.id === "arc-return" || cell.id === "release-turn";
         })
       : preferredPool;
     const pool = responsePool.length ? responsePool : preferredPool.length ? preferredPool : MELODIC_CELLS;
     return deepClone(pool[Math.floor(Math.random() * pool.length)]);
   }
 
+  function getMelodicCellById(cellId) {
+    return MELODIC_CELLS.find(function (cell) {
+      return cell.id === cellId;
+    }) || null;
+  }
+
+  function resolveSurpriseZone(mode, preferredZone) {
+    if (preferredZone && preferredZone !== "auto") {
+      return preferredZone;
+    }
+    if (mode === "tail" || mode === "cadence") {
+      return "ending";
+    }
+    if (mode === "continuation") {
+      return "middle";
+    }
+    return "balanced";
+  }
+
+  function getSurpriseBiasForSlot(zone, slot, blockIndex, blockCount) {
+    const isOpening = blockIndex === 0;
+    const isEnding = blockIndex === blockCount - 1;
+    const isMiddle = blockIndex > 0 && blockIndex < blockCount - 1;
+    const slotWeights = {
+      Sequence: 1.2,
+      Bridge: 1.15,
+      B: 1.05,
+      C: 1.1,
+      Answer: 1.05,
+      Release: 0.95,
+      Tail: 0.9,
+      Cadence: 0.82,
+      Tag: 0.92,
+      Approach: 0.98,
+    };
+    const slotWeight = slotWeights[slot] == null ? 1 : slotWeights[slot];
+
+    if (zone === "minimal") {
+      return 0.28 * slotWeight;
+    }
+    if (zone === "opening") {
+      return (isOpening ? 1.18 : isMiddle ? 0.72 : 0.52) * slotWeight;
+    }
+    if (zone === "middle") {
+      return (isMiddle ? 1.22 : isEnding ? 0.58 : 0.68) * slotWeight;
+    }
+    if (zone === "ending") {
+      return (isEnding ? 1.28 : isMiddle ? 0.72 : 0.45) * slotWeight;
+    }
+    return 1 * slotWeight;
+  }
+
   function transformMelodicCell(cell, settings, mode) {
     const offsets = cell.offsets.slice();
+    if (mode === "cadence") {
+      return offsets.map(function (offset, index) {
+        const downward = offset > 0 ? -offset : offset;
+        if (index === offsets.length - 1) {
+          return Math.min(downward, -2);
+        }
+        return downward;
+      });
+    }
+    if (mode === "tail") {
+      return offsets.map(function (offset, index) {
+        const downward = offset > 0 ? -offset : offset;
+        return index % 3 === 1 ? downward + 1 : downward;
+      });
+    }
     if (mode === "response") {
       return offsets.map(function (offset) {
         return offset > 0 ? -offset : offset;
@@ -327,6 +422,12 @@
   }
 
   function chooseAnchorShift(settings, mode) {
+    if (mode === "cadence") {
+      return -2;
+    }
+    if (mode === "tail") {
+      return -1;
+    }
     if (mode === "response") {
       return -1;
     }
@@ -377,7 +478,16 @@
     return plan.slice(0, noteCount);
   }
 
-  function chooseLogicForm(remainingSteps, mode) {
+  function chooseLogicForm(remainingSteps, mode, preferredFormId) {
+    if (preferredFormId && preferredFormId !== "auto" && LOGIC_FORM_PRESETS[preferredFormId]) {
+      return deepClone(LOGIC_FORM_PRESETS[preferredFormId]);
+    }
+    if (mode === "cadence") {
+      return remainingSteps >= 12 ? ["Approach", "Cadence"] : ["Cadence"];
+    }
+    if (mode === "tail") {
+      return remainingSteps >= 12 ? ["Release", "Tail"] : ["Tail"];
+    }
     if (mode === "response") {
       return Math.random() > 0.5 ? ["Echo", "Answer"] : ["Setup", "Answer", "Tag"];
     }
@@ -429,6 +539,12 @@
       if ((variant === "Answer" || variant === "Release" || variant === "Tag") && pointer === rhythmSeed.length - 1) {
         duration += 1;
       }
+      if ((variant === "Tail" || variant === "Cadence") && used + duration >= targetSteps) {
+        duration = Math.max(duration, Math.min(4, targetSteps - used));
+      }
+      if (variant === "Approach" && pointer % 2 === 0) {
+        duration = Math.max(1, duration - 1);
+      }
       if (variant === "Bridge" && pointer % 2 === 0) {
         duration = Math.min(duration + 1, targetSteps - used);
       }
@@ -452,10 +568,19 @@
       if ((variant === "A'" || variant === "Sequence") && index % 4 === 1) {
         offset += settings.tensionCurve === "fall" ? -1 : 1;
       }
+      if (variant === "Tail") {
+        offset = Math.min(offset, 0) - (index === count - 1 ? 1 : 0);
+      }
+      if (variant === "Cadence") {
+        offset = Math.min(offset, -Math.floor(index / 2));
+      }
+      if (variant === "Approach" && index === count - 1) {
+        offset = Math.min(offset, -1);
+      }
       if (variant === "Bridge" && index % 3 === 2) {
         offset += settings.tensionCurve === "fall" ? -2 : 2;
       }
-      if (variant === "Answer" || variant === "Release" || variant === "Tag") {
+      if (variant === "Answer" || variant === "Release" || variant === "Tag" || variant === "Tail" || variant === "Cadence") {
         offset = Math.min(offset, transformed[Math.min(index % transformed.length, transformed.length - 1)]);
       }
       offsets.push(offset);
@@ -464,11 +589,13 @@
   }
 
   function buildLogicBlocks(totalSteps, settings, mode, scaleLadder, seedMidi) {
-    const form = chooseLogicForm(totalSteps, mode);
+    const form = chooseLogicForm(totalSteps, mode, settings.preferredFormId);
+    const surpriseZone = resolveSurpriseZone(mode, settings.surpriseZone);
     const sectionSteps = splitStepsAcrossBlocks(totalSteps, form);
-    const primaryCell = pickMelodicCell(settings, mode);
-    const secondaryCell = chooseSecondaryCell(primaryCell, settings, mode);
-    const tertiaryCell = chooseSecondaryCell(secondaryCell, settings, mode);
+    const lockedCell = settings.preferredCellId ? getMelodicCellById(settings.preferredCellId) : null;
+    const primaryCell = lockedCell ? deepClone(lockedCell) : pickMelodicCell(settings, mode);
+    const secondaryCell = lockedCell ? deepClone(lockedCell) : chooseSecondaryCell(primaryCell, settings, mode);
+    const tertiaryCell = lockedCell ? deepClone(lockedCell) : chooseSecondaryCell(secondaryCell, settings, mode);
     const primaryRhythm = pickRhythmCell(settings);
     const secondaryRhythm = pickRhythmCell(settings);
     const tertiaryRhythm = pickRhythmCell(settings);
@@ -488,8 +615,12 @@
         cell = tertiaryCell;
         rhythm = tertiaryRhythm;
       }
-      const durations = buildBlockDurations(sectionSteps[index], rhythm, settings, slot);
-      const offsets = buildBlockOffsets(cell, durations.length, slot, settings, mode);
+      const surpriseBias = getSurpriseBiasForSlot(surpriseZone, slot, index, form.length);
+      const blockSettings = Object.assign({}, settings, {
+        surprise: clamp(settings.surprise * surpriseBias, 0, 1),
+      });
+      const durations = buildBlockDurations(sectionSteps[index], rhythm, blockSettings, slot);
+      const offsets = buildBlockOffsets(cell, durations.length, slot, blockSettings, mode);
       const blockDegrees = [];
 
       offsets.forEach(function (offset) {
@@ -510,11 +641,13 @@
         rhythmCell: rhythm.slice(),
         durations: durations,
         degreeIndexes: blockDegrees,
+        surpriseBias: surpriseBias,
       });
     });
 
     return {
       form: form.join(" -> "),
+      surpriseZone: surpriseZone,
       blocks: blocks,
     };
   }
@@ -596,8 +729,40 @@
       denominator: basePattern.denominator,
       grid: basePattern.grid,
       notes: notes,
-      generationMeta: generationMeta || null,
+      generationMeta: generationMeta == null ? basePattern.generationMeta || null : generationMeta,
     });
+  }
+
+  function findNearestMidi(candidates, targetMidi) {
+    if (!candidates.length) {
+      return targetMidi;
+    }
+    return candidates.reduce(function (best, candidate) {
+      if (Math.abs(candidate - targetMidi) < Math.abs(best - targetMidi)) {
+        return candidate;
+      }
+      return best;
+    }, candidates[0]);
+  }
+
+  function fitPatternToInstrument(pattern, instrumentProfile, scaleDefinition) {
+    const allowed = scaleDefinition ? getAllowedMidiNotes(scaleDefinition, instrumentProfile) : [];
+    const notes = pattern.notes.map(function (note) {
+      const rawMidi = pitchSpecToMidi(note.pitch);
+      let targetMidi = clamp(rawMidi, instrumentProfile.minMidi, instrumentProfile.maxMidi);
+      if (allowed.length) {
+        targetMidi = findNearestMidi(allowed, targetMidi);
+      }
+      return {
+        id: note.id || createId("note"),
+        pitch: midiToPitchSpec(targetMidi, note.pitch.offsetCents),
+        startStep: note.startStep,
+        durationSteps: note.durationSteps,
+        velocity: note.velocity,
+        articulation: note.articulation,
+      };
+    });
+    return createPatternFromNotes(pattern, notes, pattern.name, pattern.generationMeta || null);
   }
 
   function createSeedNotes(sourcePattern, mode, settings) {
@@ -632,24 +797,84 @@
         });
     }
 
-    if (mode === "response") {
-      return sourceNotes
-        .filter(function (note) {
-          return note.startStep < Math.floor(sourcePattern.grid / 2);
-        })
-        .map(function (note) {
-          return {
-            id: createId("note"),
-            pitch: midiToPitchSpec(Math.max(0, pitchSpecToMidi(note.pitch) - 2), note.pitch.offsetCents),
-            startStep: clamp(note.startStep + Math.floor(sourcePattern.grid / 2), 0, sourcePattern.grid - 1),
-            durationSteps: note.durationSteps,
-            velocity: clamp(note.velocity - 6, 30, 127),
-            articulation: note.articulation,
-          };
-        });
-    }
-
     return [];
+  }
+
+  function deriveResponseSeedMidi(sourcePattern, instrumentProfile) {
+    const sourceNotes = sortNotes(sourcePattern.notes);
+    if (!sourceNotes.length) {
+      return Math.round((instrumentProfile.minMidi + instrumentProfile.maxMidi) / 2);
+    }
+    const pivotIndex = Math.max(0, Math.floor(sourceNotes.length / 2) - 1);
+    return pitchSpecToMidi(sourceNotes[pivotIndex].pitch);
+  }
+
+  function deriveModeSeedMidi(sourcePattern, instrumentProfile, mode) {
+    const sourceNotes = sortNotes(sourcePattern.notes);
+    if (!sourceNotes.length) {
+      return Math.round((instrumentProfile.minMidi + instrumentProfile.maxMidi) / 2);
+    }
+    if (mode === "cadence") {
+      return pitchSpecToMidi(sourceNotes[sourceNotes.length - 1].pitch);
+    }
+    if (mode === "tail") {
+      return pitchSpecToMidi(sourceNotes[sourceNotes.length - 1].pitch);
+    }
+    if (mode === "response") {
+      return deriveResponseSeedMidi(sourcePattern, instrumentProfile);
+    }
+    return pitchSpecToMidi(sourceNotes[sourceNotes.length - 1].pitch);
+  }
+
+  function finalizeClosingNote(notes, mode, allowedMidis, scaleDefinition, patternGrid) {
+    if (!notes.length || !allowedMidis.length || !isClosingMode(mode)) {
+      return;
+    }
+    const last = notes[notes.length - 1];
+    const rootPc = scaleDefinition.rootPc;
+    const fifthPc = normalizePc(scaleDefinition.rootPc + 7);
+    const thirdPc = normalizePc(scaleDefinition.rootPc + 4);
+    const targets = allowedMidis.filter(function (midi) {
+      const pc = normalizePc(midi);
+      if (mode === "cadence") {
+        return pc === rootPc || pc === fifthPc;
+      }
+      return pc === rootPc || pc === thirdPc || pc === fifthPc;
+    });
+    if (!targets.length) {
+      return;
+    }
+    const nearest = findNearestMidi(targets, pitchSpecToMidi(last.pitch));
+    last.pitch = midiToPitchSpec(nearest, last.pitch.offsetCents);
+    last.durationSteps = clamp(
+      Math.max(last.durationSteps, Math.min(4, 1 + Math.floor(notes.length / 3))),
+      1,
+      Math.max(1, patternGrid - last.startStep)
+    );
+    if (mode === "cadence") {
+      last.articulation = "legato";
+      last.velocity = clamp(last.velocity + 6, 48, 124);
+    }
+  }
+
+  function enforceFallContour(notes, allowedMidis) {
+    if (notes.length < 2 || !allowedMidis.length) {
+      return;
+    }
+    const firstMidi = pitchSpecToMidi(notes[0].pitch);
+    const last = notes[notes.length - 1];
+    const lastMidi = pitchSpecToMidi(last.pitch);
+    if (lastMidi <= firstMidi) {
+      return;
+    }
+    const lowerTargets = allowedMidis.filter(function (midi) {
+      return midi <= firstMidi;
+    });
+    if (!lowerTargets.length) {
+      return;
+    }
+    const targetMidi = findNearestMidi(lowerTargets, Math.min(lastMidi, firstMidi));
+    last.pitch = midiToPitchSpec(targetMidi, last.pitch.offsetCents);
   }
 
   function generatePattern(config) {
@@ -661,15 +886,20 @@
       repeatRate: clamp(config.repeatRate == null ? 0.45 : config.repeatRate, 0, 0.95),
       surprise: clamp(config.surprise == null ? 0.25 : config.surprise, 0, 1),
       tensionCurve: config.tensionCurve || "arc",
+      preferredFormId: config.preferredFormId || "auto",
+      preferredCellId: config.preferredCellId || "auto",
+      surpriseZone: config.surpriseZone || "auto",
     };
     const mode = config.mode || "new";
     const allowedMidis = getAllowedMidiNotes(config.scaleDefinition, config.instrumentProfile);
     const scaleLadder = buildScaleLadder(config.scaleDefinition, config.instrumentProfile);
     const notes = createSeedNotes(sourcePattern || patternTemplate, mode, settings);
-    let step = mode === "response" ? 0 : notes.reduce(function (max, note) {
+    const seedMidi =
+      isResponseLikeMode(mode) ? deriveModeSeedMidi(sourcePattern || patternTemplate, config.instrumentProfile, mode) : null;
+    let step = notes.reduce(function (max, note) {
       return Math.max(max, note.startStep + note.durationSteps);
     }, 0);
-    let previousMidi = notes.length ? pitchSpecToMidi(notes[notes.length - 1].pitch) : null;
+    let previousMidi = notes.length ? pitchSpecToMidi(notes[notes.length - 1].pitch) : seedMidi;
     const remainingSteps = Math.max(0, patternTemplate.grid - step);
     const logicPlan = buildLogicBlocks(remainingSteps, settings, mode, scaleLadder, previousMidi);
 
@@ -729,6 +959,11 @@
       }
     }
 
+    finalizeClosingNote(notes, mode, allowedMidis, config.scaleDefinition, patternTemplate.grid);
+    if (settings.tensionCurve === "fall") {
+      enforceFallContour(notes, allowedMidis);
+    }
+
     enforceMelodicVariety(notes, allowedMidis);
 
     return createPatternFromNotes(
@@ -737,12 +972,16 @@
       mode === "new" ? "Generated Pattern" : "Generated " + mode,
       {
         form: logicPlan.form,
+        preferredFormId: settings.preferredFormId,
+        preferredCellId: settings.preferredCellId,
+        surpriseZone: logicPlan.surpriseZone,
         blocks: logicPlan.blocks.map(function (block) {
           return {
             slot: block.slot,
             melodicCellId: block.melodicCellId,
             rhythmCell: block.rhythmCell.join("-"),
             noteCount: block.degreeIndexes.length,
+            surpriseBias: block.surpriseBias,
           };
         }),
       }
@@ -867,6 +1106,7 @@
       style: meta.style || "lyrical",
       sourcePattern: deepClone(pattern),
       recommendedUse: meta.recommendedUse || "idea starter",
+      provenance: meta.provenance || "generator",
     };
   }
 
@@ -933,7 +1173,7 @@
     });
     template.grid = Math.max(offset, 1);
     template.notes = notes;
-    return ensureMonophonic(template);
+    return fitPatternToInstrument(ensureMonophonic(template), instrumentProfile, scaleDefinition);
   }
 
   function generatePracticeDrill(options) {
@@ -1123,6 +1363,9 @@
     NOTE_NAMES: NOTE_NAMES,
     MODE_INTERVALS: MODE_INTERVALS,
     INSTRUMENT_PRESETS: INSTRUMENT_PRESETS,
+    MELODIC_CELLS: MELODIC_CELLS,
+    LOGIC_FORM_PRESETS: LOGIC_FORM_PRESETS,
+    SURPRISE_ZONE_PRESETS: SURPRISE_ZONE_PRESETS,
     clamp: clamp,
     createId: createId,
     createScaleDefinition: createScaleDefinition,
@@ -1136,6 +1379,8 @@
     transposePattern: transposePattern,
     chromaticTransposePattern: chromaticTransposePattern,
     diatonicTransposePattern: diatonicTransposePattern,
+    fitPatternToInstrument: fitPatternToInstrument,
+    transformPattern: transformPattern,
     reversePattern: reversePattern,
     stretchPattern: stretchPattern,
     organicHumanize: organicHumanize,
