@@ -190,7 +190,24 @@
                 <option value="variation">局部变体</option>
                 <option value="continuation">续写后半句</option>
                 <option value="response">回答句</option>
+                <option value="tail">收尾句</option>
+                <option value="cadence">终止句</option>
               </select>
+            </label>
+
+            <label class="control">
+              <span>锁定 Form</span>
+              <select id="generationFormLockSelect"></select>
+            </label>
+
+            <label class="control">
+              <span>锁定 Cell 家族</span>
+              <select id="generationCellLockSelect"></select>
+            </label>
+
+            <label class="control">
+              <span>惊喜分区</span>
+              <select id="generationSurpriseZoneSelect"></select>
             </label>
           </div>
 
@@ -201,9 +218,32 @@
             <button id="stretchPatternBtn">拉伸 x2</button>
           </div>
 
+          <div class="generator-preset-bar">
+            <label class="control compact">
+              <span>Generator Preset</span>
+              <select id="generatorPresetSelect"></select>
+            </label>
+            <div class="button-row compact-actions">
+              <button id="saveGeneratorPresetBtn" type="button">Save Current</button>
+              <button id="applyGeneratorPresetBtn" type="button">Apply</button>
+              <button id="overwriteGeneratorPresetBtn" type="button">Overwrite</button>
+              <button id="deleteGeneratorPresetBtn" type="button">Delete</button>
+            </div>
+          </div>
+          <p id="generatorPresetSummary" class="generator-preset-summary"></p>
+          <p id="generatorPresetDiff" class="generator-preset-summary"></p>
+
           <div class="generator-notes">
             <strong>当前策略</strong>
             <p id="generationSummary"></p>
+          </div>
+
+          <div class="generator-notes">
+            <div class="panel-title-row mini">
+              <strong>模式预览</strong>
+              <span class="panel-tag">Click To Switch</span>
+            </div>
+            <div id="generationModePreview" class="generation-mode-preview"></div>
           </div>
 
           <div class="generator-notes">
@@ -302,10 +342,14 @@
                     <option value="16">16x</option>
                   </select>
                 </label>
+                <button id="playPhraseSelectionBtn">循环选中段</button>
                 <button id="playPhraseLoopBtn">循环播放 Phrase</button>
                 <button id="clearPhraseBtn">清空 Phrase</button>
               </div>
             </div>
+            <div id="phraseSnapshotPanel" class="phrase-snapshot-panel"></div>
+            <div id="phraseSnapshotDiff" class="phrase-snapshot-diff"></div>
+            <div id="phraseMorphTrail" class="phrase-morph-trail"></div>
             <div id="phraseInspector" class="phrase-inspector"></div>
             <div id="phraseTimeline" class="phrase-timeline"></div>
           </div>
@@ -321,6 +365,25 @@
             <label class="control">
               <span>搜索</span>
               <input id="motifSearchInput" type="text" placeholder="tag / style / name" />
+            </label>
+            <label class="control">
+              <span>来源</span>
+              <select id="motifProvenanceFilter"></select>
+            </label>
+            <label class="control">
+              <span>筛选风格</span>
+              <select id="motifStyleFilter"></select>
+            </label>
+            <label class="control">
+              <span>筛选难度</span>
+              <select id="motifDifficultyFilter">
+                <option value="all">All</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
             </label>
             <label class="control">
               <span>名称</span>
@@ -344,6 +407,10 @@
               <span>风格</span>
               <input id="motifStyleInput" type="text" placeholder="lyrical / angular / funky" />
             </label>
+          </div>
+          <div class="motif-filter-bar">
+            <span id="motifFilterSummary" class="panel-tag"></span>
+            <button id="clearMotifFiltersBtn" type="button">Clear Filters</button>
           </div>
 
           <div id="motifLibrary" class="motif-library"></div>
@@ -402,6 +469,7 @@
           <div>
             <h3 class="motif-name"></h3>
             <p class="motif-meta"></p>
+            <p class="motif-provenance"></p>
           </div>
           <span class="motif-badge"></span>
         </div>
@@ -411,7 +479,7 @@
           <button data-action="load">载入</button>
           <button data-action="phrase">加入 Phrase</button>
           <button data-action="transpose">+2</button>
-          <button data-action="answer">回应句</button>
+          <button data-action="answer">收尾句</button>
           <button data-action="duplicate">复制</button>
           <button data-action="edit">编辑</button>
           <button data-action="delete">删除</button>
@@ -421,9 +489,33 @@
 
     <template id="phraseBlockTemplate">
       <article class="phrase-block">
-        <div>
+        <div class="phrase-block-head">
           <h4 class="phrase-block-name"></h4>
-          <p class="phrase-block-meta"></p>
+          <span class="phrase-drag-hint">Drag · Alt+Drag To Copy</span>
+        </div>
+        <p class="phrase-block-meta"></p>
+        <div class="phrase-drop-hint">拖到别的位置重排；按住 Alt 拖拽会复制一份。</div>
+        <div class="phrase-lanes">
+          <div class="phrase-lane">
+            <strong class="phrase-lane-label">源 Motif</strong>
+            <div class="phrase-mini-roll" data-role="source-roll"></div>
+            <p class="phrase-lane-preview" data-role="source-preview"></p>
+          </div>
+          <div class="phrase-lane">
+            <strong class="phrase-lane-label">当前 Block</strong>
+            <div class="phrase-mini-roll" data-role="block-roll"></div>
+            <p class="phrase-lane-preview" data-role="block-preview"></p>
+          </div>
+          <div class="phrase-lane">
+            <strong class="phrase-lane-label">落地片段</strong>
+            <div class="phrase-mini-roll" data-role="phrase-roll"></div>
+            <p class="phrase-lane-preview" data-role="phrase-preview"></p>
+          </div>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="play-source">试听源</button>
+          <button data-action="play-block">试听块</button>
+          <button data-action="load-block">载入块</button>
         </div>
         <div class="button-row compact-actions">
           <button data-action="diatonic-down">顺阶 -1</button>
@@ -464,6 +556,56 @@
           <button data-action="load">载入</button>
           <button data-action="motif">存成 Motif</button>
           <button data-action="phrase">加入 Phrase</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="phraseSnapshotTemplate">
+      <article class="phrase-snapshot-card">
+        <div class="phrase-snapshot-head">
+          <h4 class="phrase-snapshot-name"></h4>
+          <span class="panel-tag phrase-snapshot-badge"></span>
+        </div>
+        <p class="phrase-snapshot-meta"></p>
+        <p class="phrase-snapshot-preview"></p>
+        <div class="button-row compact-actions">
+          <button data-action="save">保存当前</button>
+          <button data-action="play">试听</button>
+          <button data-action="load">载入</button>
+          <button data-action="clear">清空</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="phraseMorphTrailTemplate">
+      <article class="phrase-morph-card">
+        <div class="phrase-morph-head">
+          <div>
+            <h4 class="phrase-morph-name"></h4>
+            <p class="phrase-morph-meta"></p>
+          </div>
+          <span class="panel-tag phrase-morph-badge"></span>
+        </div>
+        <p class="phrase-morph-preview"></p>
+        <p class="phrase-morph-notes"></p>
+        <p class="phrase-morph-diff-summary"></p>
+        <div class="phrase-morph-diff-lane"></div>
+        <div class="phrase-morph-roll-wrap">
+          <div class="phrase-morph-roll-head">
+            <span>Trail</span>
+            <span>Current</span>
+          </div>
+          <div data-role="compare-roll" class="phrase-mini-roll phrase-morph-roll-overlay"></div>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="edit">Edit</button>
+          <button data-action="pin">Pin</button>
+          <button data-action="play">Preview</button>
+          <button data-action="load">Load</button>
+          <button data-action="motif">To Motif</button>
+          <button data-action="save-a">To A</button>
+          <button data-action="save-b">To B</button>
+          <button data-action="delete">Delete</button>
         </div>
       </article>
     </template>

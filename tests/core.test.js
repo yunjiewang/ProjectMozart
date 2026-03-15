@@ -78,6 +78,135 @@ test("diatonic and chromatic transposition stay distinct", function () {
   );
 });
 
+test("fitPatternToInstrument clamps notes into the active instrument register", function () {
+  const scale = core.createScaleDefinition(0, "ionian");
+  const instrument = { id: "narrow", name: "Narrow", minMidi: 60, maxMidi: 67, waveform: "sine", midiProgram: 81 };
+  const pattern = core.createEmptyPattern({ name: "Wide", grid: 4 });
+  core.upsertNote(pattern, 0, 52, { durationSteps: 1 });
+  core.upsertNote(pattern, 1, 76, { durationSteps: 1 });
+
+  const fitted = core.fitPatternToInstrument(pattern, instrument, scale);
+
+  assert.deepEqual(
+    fitted.notes.map(function (note) {
+      return core.pitchSpecToMidi(note.pitch);
+    }),
+    [60, 67]
+  );
+});
+
+test("tail mode trends toward a lower closing register", function () {
+  const scale = core.createScaleDefinition(7, "dorian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const source = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.55,
+    maxLeap: 5,
+    repeatRate: 0.35,
+    surprise: 0.18,
+    tensionCurve: "arc",
+    mode: "new",
+  });
+  const tail = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    sourcePattern: source,
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.45,
+    maxLeap: 5,
+    repeatRate: 0.25,
+    surprise: 0.12,
+    tensionCurve: "fall",
+    mode: "tail",
+  });
+
+  const mids = tail.notes.map(function (note) {
+    return core.pitchSpecToMidi(note.pitch);
+  });
+  assert.ok(mids.length > 1);
+  assert.ok(mids[mids.length - 1] <= mids[0], "expected tail to close at or below its opening pitch");
+});
+
+test("cadence mode closes on a stable chord tone", function () {
+  const scale = core.createScaleDefinition(0, "ionian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const source = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.55,
+    maxLeap: 5,
+    repeatRate: 0.35,
+    surprise: 0.18,
+    tensionCurve: "rise",
+    mode: "new",
+  });
+  const cadence = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    sourcePattern: source,
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.35,
+    maxLeap: 4,
+    repeatRate: 0.2,
+    surprise: 0.08,
+    tensionCurve: "fall",
+    mode: "cadence",
+  });
+
+  const lastMidi = core.pitchSpecToMidi(cadence.notes[cadence.notes.length - 1].pitch);
+  const lastPc = core.normalizePc(lastMidi);
+  assert.ok(lastPc === scale.rootPc || lastPc === core.normalizePc(scale.rootPc + 7));
+});
+
+test("generator respects locked form and melodic cell", function () {
+  const scale = core.createScaleDefinition(7, "dorian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const pattern = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.52,
+    maxLeap: 5,
+    repeatRate: 0.3,
+    surprise: 0.12,
+    tensionCurve: "arc",
+    mode: "new",
+    preferredFormId: "a-b-release",
+    preferredCellId: "pendulum-climb",
+  });
+
+  assert.equal(pattern.generationMeta.form, "A -> B -> Release");
+  assert.ok(pattern.generationMeta.blocks.length >= 3);
+  pattern.generationMeta.blocks.forEach(function (block) {
+    assert.equal(block.melodicCellId, "pendulum-climb");
+  });
+});
+
+test("ending surprise zone weights the closing block more heavily", function () {
+  const scale = core.createScaleDefinition(7, "dorian");
+  const instrument = core.INSTRUMENT_PRESETS[0];
+  const pattern = core.generatePattern({
+    pattern: core.createEmptyPattern({ grid: 16 }),
+    scaleDefinition: scale,
+    instrumentProfile: instrument,
+    density: 0.52,
+    maxLeap: 5,
+    repeatRate: 0.3,
+    surprise: 0.3,
+    tensionCurve: "arc",
+    mode: "new",
+    preferredFormId: "a-b-release",
+    surpriseZone: "ending",
+  });
+
+  assert.equal(pattern.generationMeta.surpriseZone, "ending");
+  assert.ok(pattern.generationMeta.blocks.length >= 3);
+  assert.ok(pattern.generationMeta.blocks[2].surpriseBias > pattern.generationMeta.blocks[0].surpriseBias);
+});
+
 test("practice drill creates the requested number of drills", function () {
   const scale = core.createScaleDefinition(9, "minorPentatonic");
   const instrument = core.INSTRUMENT_PRESETS[0];

@@ -2,12 +2,104 @@
   const core = window.MozartCore;
   const STORAGE_KEY = "project-mozart-state-v1";
   const MAX_UNDO_STACK = 40;
+  const MAX_MORPH_TRAIL = 6;
   const audioState = {
     context: null,
     voices: [],
   };
   const interactionState = {
     checkpoints: {},
+    phraseDrag: null,
+  };
+  const GENERATION_MODE_LABELS = {
+    new: "新 Motif",
+    variation: "局部变体",
+    continuation: "续写后半句",
+    response: "回答句",
+    tail: "收尾句",
+    cadence: "终止句",
+  };
+  const GENERATION_MODE_PREVIEWS = {
+    new: {
+      family: "Build",
+      tagline: "从零起句，重心均衡，适合开新方向。",
+      contour: [0.35, 0.52, 0.62, 0.48, 0.68, 0.58],
+      traits: ["新主题", "中等开放", "允许惊喜扩展"],
+    },
+    variation: {
+      family: "Morph",
+      tagline: "保留原型轮廓，只在局部做偏移和装饰。",
+      contour: [0.45, 0.5, 0.56, 0.5, 0.6, 0.54],
+      traits: ["贴近原句", "局部改写", "适合 sequence"],
+    },
+    continuation: {
+      family: "Extend",
+      tagline: "承接现有前半句，把逻辑往后推进。",
+      contour: [0.42, 0.46, 0.55, 0.62, 0.66, 0.7],
+      traits: ["后半续写", "方向延伸", "尾部仍开放"],
+    },
+    response: {
+      family: "Reply",
+      tagline: "保留呼应感，但不急着完全落地。",
+      contour: [0.62, 0.57, 0.5, 0.54, 0.46, 0.4],
+      traits: ["呼应原句", "轻微回摆", "保留后续空间"],
+    },
+    tail: {
+      family: "Release",
+      tagline: "明显收束和释放，适合把段落往下带。",
+      contour: [0.7, 0.62, 0.56, 0.48, 0.38, 0.28],
+      traits: ["下降释放", "更像句尾", "惊喜集中在连接处"],
+    },
+    cadence: {
+      family: "Land",
+      tagline: "强终止感，优先落到稳定 chord tone。",
+      contour: [0.68, 0.58, 0.46, 0.36, 0.24, 0.16],
+      traits: ["稳定落点", "结束感最强", "适合段落终止"],
+    },
+  };
+  const GENERATION_FORM_LABELS = {
+    auto: "自动",
+    "a-b": "A -> B",
+    "a-b-release": "A -> B -> Release",
+    "a-a1-b-tag": "A -> A' -> B -> Tag",
+    "statement-sequence-release": "Statement -> Sequence -> Release",
+    "echo-answer": "Echo -> Answer",
+    "setup-answer-tag": "Setup -> Answer -> Tag",
+    "release-tail": "Release -> Tail",
+    "approach-cadence": "Approach -> Cadence",
+    cadence: "Cadence",
+  };
+  const GENERATION_CELL_LABELS = {
+    auto: "自动",
+    "third-weave-up": "Third Weave Up",
+    "step-crest": "Step Crest",
+    "pendulum-climb": "Pendulum Climb",
+    "neighbor-bloom": "Neighbor Bloom",
+    "answer-fall": "Answer Fall",
+    "arc-return": "Arc Return",
+    "skip-sequence": "Skip Sequence",
+    "release-turn": "Release Turn",
+  };
+  const GENERATION_SURPRISE_ZONE_LABELS = {
+    auto: "自动",
+    balanced: "均匀分布",
+    middle: "中段发展",
+    ending: "句尾连接",
+    opening: "起句点火",
+    minimal: "尽量克制",
+  };
+  const MORPH_MODE_LABELS = {
+    "a-heavy": "A-heavy",
+    balanced: "Balanced",
+    "b-heavy": "B-heavy",
+  };
+  const MOTIF_PROVENANCE_LABELS = {
+    generator: "Generator",
+    pattern: "Hand-saved Pattern",
+    history: "History Snapshot",
+    "morph-trail": "Morph Trail",
+    "motif-derived": "Derived from Motif",
+    legacy: "Legacy Motif",
   };
 
   let state = normalizeState(loadState() || createInitialState());
@@ -42,11 +134,22 @@
     surpriseValue: document.getElementById("surpriseValue"),
     tensionCurveSelect: document.getElementById("tensionCurveSelect"),
     generationModeSelect: document.getElementById("generationModeSelect"),
+    generationFormLockSelect: document.getElementById("generationFormLockSelect"),
+    generationCellLockSelect: document.getElementById("generationCellLockSelect"),
+    generationSurpriseZoneSelect: document.getElementById("generationSurpriseZoneSelect"),
+    generatorPresetSelect: document.getElementById("generatorPresetSelect"),
+    saveGeneratorPresetBtn: document.getElementById("saveGeneratorPresetBtn"),
+    applyGeneratorPresetBtn: document.getElementById("applyGeneratorPresetBtn"),
+    overwriteGeneratorPresetBtn: document.getElementById("overwriteGeneratorPresetBtn"),
+    deleteGeneratorPresetBtn: document.getElementById("deleteGeneratorPresetBtn"),
+    generatorPresetSummary: document.getElementById("generatorPresetSummary"),
+    generatorPresetDiff: document.getElementById("generatorPresetDiff"),
     generateBtn: document.getElementById("generateBtn"),
     humanizeBtn: document.getElementById("humanizeBtn"),
     reversePatternBtn: document.getElementById("reversePatternBtn"),
     stretchPatternBtn: document.getElementById("stretchPatternBtn"),
     generationSummary: document.getElementById("generationSummary"),
+    generationModePreview: document.getElementById("generationModePreview"),
     logicFormLabel: document.getElementById("logicFormLabel"),
     generationBlocks: document.getElementById("generationBlocks"),
     duplicatePatternBtn: document.getElementById("duplicatePatternBtn"),
@@ -68,13 +171,22 @@
     transposeUpBtn: document.getElementById("transposeUpBtn"),
     transposeDownBtn: document.getElementById("transposeDownBtn"),
     phraseTimeline: document.getElementById("phraseTimeline"),
+    phraseSnapshotPanel: document.getElementById("phraseSnapshotPanel"),
+    phraseSnapshotDiff: document.getElementById("phraseSnapshotDiff"),
+    phraseMorphTrail: document.getElementById("phraseMorphTrail"),
     phraseLoopCountSelect: document.getElementById("phraseLoopCountSelect"),
+    playPhraseSelectionBtn: document.getElementById("playPhraseSelectionBtn"),
     playPhraseLoopBtn: document.getElementById("playPhraseLoopBtn"),
     clearPhraseBtn: document.getElementById("clearPhraseBtn"),
     motifNameInput: document.getElementById("motifNameInput"),
     motifTagsInput: document.getElementById("motifTagsInput"),
     motifDifficultySelect: document.getElementById("motifDifficultySelect"),
     motifStyleInput: document.getElementById("motifStyleInput"),
+    motifProvenanceFilter: document.getElementById("motifProvenanceFilter"),
+    motifStyleFilter: document.getElementById("motifStyleFilter"),
+    motifDifficultyFilter: document.getElementById("motifDifficultyFilter"),
+    motifFilterSummary: document.getElementById("motifFilterSummary"),
+    clearMotifFiltersBtn: document.getElementById("clearMotifFiltersBtn"),
     motifLibrary: document.getElementById("motifLibrary"),
     motifCount: document.getElementById("motifCount"),
     practiceModeSelect: document.getElementById("practiceModeSelect"),
@@ -128,6 +240,7 @@
       tags: ["dorian", "airy"],
       difficulty: 2,
       style: "lyrical",
+      provenance: "generator",
     });
     const phrase = core.createEmptyPhraseSequence();
     core.addMotifToPhrase(phrase, starterMotif);
@@ -141,6 +254,10 @@
       selectedNoteId: pattern.notes[0] ? pattern.notes[0].id : null,
       motifLibrary: [starterMotif],
       phrase: phrase,
+      phraseSelection: { start: null, end: null },
+      phraseSnapshots: { a: null, b: null },
+      phraseMorphMode: "balanced",
+      phraseMorphTrail: [],
       phraseLoopCount: 4,
       generator: {
         density: 0.52,
@@ -149,9 +266,37 @@
         surprise: 0.24,
         tensionCurve: "arc",
         mode: "new",
+        preferredFormId: "auto",
+        preferredCellId: "auto",
+        surpriseZone: "auto",
       },
+      generatorPresets: [
+        {
+          id: core.createId("preset"),
+          name: "Organic Dorian Builder",
+          instrumentId: instrument.id,
+          scale: core.deepClone(scale),
+          generator: {
+            density: 0.52,
+            maxLeap: 5,
+            repeatRate: 0.5,
+            surprise: 0.24,
+            tensionCurve: "arc",
+            mode: "new",
+            preferredFormId: "auto",
+            preferredCellId: "auto",
+            surpriseZone: "auto",
+          },
+        },
+      ],
+      selectedGeneratorPresetId: null,
       history: [],
       motifSearch: "",
+      motifFilters: {
+        provenance: "all",
+        style: "all",
+        difficulty: "all",
+      },
       undoStack: [],
       redoStack: [],
       practice: {
@@ -183,12 +328,33 @@
     next.practice = Object.assign({}, base.practice, inputState && inputState.practice ? inputState.practice : {});
     next.history = Array.isArray(inputState && inputState.history) ? inputState.history : [];
     next.motifSearch = typeof (inputState && inputState.motifSearch) === "string" ? inputState.motifSearch : "";
+    next.motifFilters = normalizeMotifFilters(inputState && inputState.motifFilters ? inputState.motifFilters : base.motifFilters);
+    next.generatorPresets = normalizeGeneratorPresets(
+      inputState && inputState.generatorPresets ? inputState.generatorPresets : base.generatorPresets
+    );
+    next.selectedGeneratorPresetId = normalizeGeneratorPresetId(
+      inputState && inputState.selectedGeneratorPresetId ? inputState.selectedGeneratorPresetId : base.selectedGeneratorPresetId,
+      next.generatorPresets
+    );
     next.undoStack = [];
     next.redoStack = [];
     next.phraseLoopCount = Number(inputState && inputState.phraseLoopCount) || base.phraseLoopCount;
-    next.motifLibrary = Array.isArray(inputState && inputState.motifLibrary) ? inputState.motifLibrary : base.motifLibrary;
+    next.motifLibrary = Array.isArray(inputState && inputState.motifLibrary)
+      ? inputState.motifLibrary.map(normalizeMotifEntry)
+      : base.motifLibrary;
     next.phrase = inputState && inputState.phrase && Array.isArray(inputState.phrase.blocks) ? inputState.phrase : base.phrase;
     next.phrase.blocks = next.phrase.blocks.map(normalizePhraseBlock);
+    next.phraseSelection = normalizePhraseSelection(
+      inputState && inputState.phraseSelection ? inputState.phraseSelection : base.phraseSelection,
+      next.phrase.blocks.length
+    );
+    next.phraseSnapshots = normalizePhraseSnapshots(
+      inputState && inputState.phraseSnapshots ? inputState.phraseSnapshots : base.phraseSnapshots
+    );
+    next.phraseMorphMode = MORPH_MODE_LABELS[inputState && inputState.phraseMorphMode] ? inputState.phraseMorphMode : base.phraseMorphMode;
+    next.phraseMorphTrail = normalizePhraseMorphTrail(
+      inputState && inputState.phraseMorphTrail ? inputState.phraseMorphTrail : base.phraseMorphTrail
+    );
     if (!Array.isArray(next.instruments) || !next.instruments.length) {
       next.instruments = core.deepClone(core.INSTRUMENT_PRESETS);
     }
@@ -218,6 +384,153 @@
     return Object.assign({}, block, {
       transform: normalizePhraseTransform(block && block.transform),
     });
+  }
+
+  function normalizeMotifEntry(motif) {
+    return Object.assign({}, motif, {
+      provenance: MOTIF_PROVENANCE_LABELS[motif && motif.provenance] ? motif.provenance : "legacy",
+    });
+  }
+
+  function normalizeMotifFilters(filters) {
+    const next = Object.assign({ provenance: "all", style: "all", difficulty: "all" }, filters || {});
+    return {
+      provenance: MOTIF_PROVENANCE_LABELS[next.provenance] ? next.provenance : "all",
+      style: typeof next.style === "string" && next.style ? next.style : "all",
+      difficulty: ["all", "1", "2", "3", "4", "5"].includes(String(next.difficulty)) ? String(next.difficulty) : "all",
+    };
+  }
+
+  function normalizeGeneratorPreset(preset) {
+    if (!preset || !preset.generator || !preset.scale) {
+      return null;
+    }
+    return {
+      id: preset.id || core.createId("preset"),
+      name: preset.name || "Generator Preset",
+      instrumentId: preset.instrumentId || null,
+      scale: core.deepClone(preset.scale),
+      generator: Object.assign(
+        {
+          density: 0.52,
+          maxLeap: 5,
+          repeatRate: 0.5,
+          surprise: 0.24,
+          tensionCurve: "arc",
+          mode: "new",
+          preferredFormId: "auto",
+          preferredCellId: "auto",
+          surpriseZone: "auto",
+        },
+        preset.generator
+      ),
+    };
+  }
+
+  function normalizeGeneratorPresets(presets) {
+    if (!Array.isArray(presets)) {
+      return [];
+    }
+    return presets.map(normalizeGeneratorPreset).filter(Boolean);
+  }
+
+  function normalizeGeneratorPresetId(presetId, presets) {
+    if (!presetId) {
+      return presets[0] ? presets[0].id : null;
+    }
+    return presets.some(function (preset) {
+      return preset.id === presetId;
+    })
+      ? presetId
+      : presets[0]
+        ? presets[0].id
+        : null;
+  }
+
+  function normalizePhraseSelection(selection, blockCount) {
+    const next = Object.assign({ start: null, end: null }, selection || {});
+    if (next.start == null || next.end == null || blockCount <= 0) {
+      return { start: null, end: null };
+    }
+    const start = core.clamp(Number(next.start), 0, blockCount - 1);
+    const end = core.clamp(Number(next.end), 0, blockCount - 1);
+    return {
+      start: Math.min(start, end),
+      end: Math.max(start, end),
+    };
+  }
+
+  function normalizePhraseSnapshot(snapshot) {
+    if (!snapshot || !snapshot.sequence || !Array.isArray(snapshot.sequence.blocks)) {
+      return null;
+    }
+    return {
+      label: snapshot.label || "Untitled",
+      savedAt: snapshot.savedAt || new Date().toISOString(),
+      sequence: {
+        id: snapshot.sequence.id || core.createId("phrase"),
+        blocks: snapshot.sequence.blocks.map(normalizePhraseBlock),
+      },
+    };
+  }
+
+  function normalizePhraseSnapshots(snapshots) {
+    const next = snapshots || {};
+    return {
+      a: normalizePhraseSnapshot(next.a),
+      b: normalizePhraseSnapshot(next.b),
+    };
+  }
+
+  function normalizePhraseMorphEntry(entry) {
+    if (!entry || !entry.sequence || !Array.isArray(entry.sequence.blocks)) {
+      return null;
+    }
+    return {
+      id: entry.id || core.createId("morph"),
+      label: entry.label || "Morph",
+      notes: typeof entry.notes === "string" ? entry.notes : "",
+      savedAt: entry.savedAt || new Date().toISOString(),
+      mode: MORPH_MODE_LABELS[entry.mode] ? entry.mode : "balanced",
+      pinned: Boolean(entry.pinned),
+      sequence: {
+        id: entry.sequence.id || core.createId("phrase"),
+        blocks: entry.sequence.blocks.map(normalizePhraseBlock),
+      },
+    };
+  }
+
+  function sortPhraseMorphTrail(trail) {
+    return trail
+      .slice()
+      .sort(function (left, right) {
+        if (Boolean(left.pinned) !== Boolean(right.pinned)) {
+          return left.pinned ? -1 : 1;
+        }
+        return new Date(right.savedAt).getTime() - new Date(left.savedAt).getTime();
+      });
+  }
+
+  function normalizePhraseMorphTrail(trail) {
+    if (!Array.isArray(trail)) {
+      return [];
+    }
+    return sortPhraseMorphTrail(
+      trail
+      .map(normalizePhraseMorphEntry)
+      .filter(Boolean)
+    ).slice(0, MAX_MORPH_TRAIL);
+  }
+
+  function trimPhraseMorphTrail(trail) {
+    const normalized = sortPhraseMorphTrail((trail || []).map(normalizePhraseMorphEntry).filter(Boolean));
+    const pinned = normalized.filter(function (entry) {
+      return entry.pinned;
+    });
+    const unpinned = normalized.filter(function (entry) {
+      return !entry.pinned;
+    });
+    return pinned.concat(unpinned.slice(0, Math.max(0, MAX_MORPH_TRAIL - pinned.length)));
   }
 
   function saveState() {
@@ -325,6 +638,804 @@
     return core.flattenPhraseSequence(state.phrase, state.motifLibrary, currentScale(), currentInstrument());
   }
 
+  function buildPhrasePatternFromSequence(sequence) {
+    return core.flattenPhraseSequence(sequence, state.motifLibrary, currentScale(), currentInstrument());
+  }
+
+  function buildPhrasePatternFromSelection() {
+    const selection = normalizePhraseSelection(state.phraseSelection, state.phrase.blocks.length);
+    if (selection.start == null) {
+      return null;
+    }
+    const pattern = core.createEmptyPattern({ name: "Phrase Section", grid: 0 });
+    let offset = 0;
+    for (let blockIndex = selection.start; blockIndex <= selection.end; blockIndex += 1) {
+      const blockPattern = buildPhraseBlockPattern(state.phrase.blocks[blockIndex]);
+      if (!blockPattern) {
+        continue;
+      }
+      blockPattern.notes.forEach(function (note) {
+        const clone = core.deepClone(note);
+        clone.id = core.createId("note");
+        clone.startStep += offset;
+        pattern.notes.push(clone);
+      });
+      offset += blockPattern.grid;
+    }
+    pattern.grid = Math.max(offset, 1);
+    return core.ensureMonophonic(pattern);
+  }
+
+  function createPhraseSnapshot(slot, sequence, label) {
+    const snapshotLabel = label || "Phrase " + slot.toUpperCase();
+    state.phraseSnapshots[slot] = {
+      label: snapshotLabel,
+      savedAt: new Date().toISOString(),
+      sequence: core.deepClone(sequence || state.phrase),
+    };
+  }
+
+  function summarizePhraseSequence(sequence) {
+    const pattern = buildPhrasePatternFromSequence(sequence);
+    const uniquePcs = new Set(
+      pattern.notes.map(function (note) {
+        return note.pitch.pc;
+      })
+    );
+    const blockLabels = sequence.blocks.map(function (block) {
+      return block.motifName;
+    });
+    const lastNote = pattern.notes.length ? pattern.notes[pattern.notes.length - 1] : null;
+    return {
+      pattern: pattern,
+      blockCount: sequence.blocks.length,
+      stepCount: pattern.grid,
+      noteCount: pattern.notes.length,
+      pitchClassCount: uniquePcs.size,
+      lastLabel: lastNote ? core.pitchSpecToLabel(lastNote.pitch) : "None",
+      blockLabels: blockLabels,
+    };
+  }
+
+  function getNormalizedBlock(sequence, position, total) {
+    if (!sequence.blocks.length) {
+      return null;
+    }
+    if (total <= 1) {
+      return sequence.blocks[0];
+    }
+    const ratio = position / Math.max(total - 1, 1);
+    const index = Math.round(ratio * (sequence.blocks.length - 1));
+    return sequence.blocks[core.clamp(index, 0, sequence.blocks.length - 1)];
+  }
+
+  function mergePhraseBlocks(primaryBlock, secondaryBlock, slotLabel, morphMode) {
+    const primary = primaryBlock || secondaryBlock;
+    const secondary = secondaryBlock || primaryBlock;
+    const blendMap = {
+      "a-heavy": 0.25,
+      balanced: 0.5,
+      "b-heavy": 0.75,
+    };
+    const blend = blendMap[morphMode] == null ? 0.5 : blendMap[morphMode];
+    const merged = core.deepClone(primary);
+    const favored = blend >= 0.5 ? secondary : primary;
+    merged.id = core.createId("block");
+    merged.motifId = favored.motifId;
+    merged.motifName = favored.motifName;
+    merged.transform = {
+      diatonicShift: Math.round((primary.transform.diatonicShift || 0) * (1 - blend) + (secondary.transform.diatonicShift || 0) * blend),
+      chromaticShift: Math.round((primary.transform.chromaticShift || 0) * (1 - blend) + (secondary.transform.chromaticShift || 0) * blend),
+      reverse:
+        slotLabel === "pivot"
+          ? blend >= 0.5
+            ? secondary.transform.reverse || primary.transform.reverse
+            : primary.transform.reverse || secondary.transform.reverse
+          : favored.transform.reverse,
+      stretch: blend >= 0.5 ? Math.max(secondary.transform.stretch || 1, primary.transform.stretch || 1) : Math.max(primary.transform.stretch || 1, secondary.transform.stretch || 1),
+    };
+    return merged;
+  }
+
+  function createMorphPhraseSequence(sequenceA, sequenceB, morphMode) {
+    const length = Math.max(sequenceA.blocks.length, sequenceB.blocks.length);
+    const hybrid = core.createEmptyPhraseSequence();
+    if (!length) {
+      return hybrid;
+    }
+    for (let index = 0; index < length; index += 1) {
+      const blockA = getNormalizedBlock(sequenceA, index, length);
+      const blockB = getNormalizedBlock(sequenceB, index, length);
+      let block = null;
+      if (index === 0) {
+        block = mergePhraseBlocks(blockA, blockB, "head", morphMode);
+      } else if (index === length - 1) {
+        block = morphMode === "a-heavy"
+          ? mergePhraseBlocks(blockA, blockB, "tail", morphMode)
+          : mergePhraseBlocks(blockB, blockA, "tail", morphMode);
+      } else if (index % 2 === 0 || morphMode === "a-heavy") {
+        block = mergePhraseBlocks(blockA, blockB, "pivot", morphMode);
+      } else {
+        block = mergePhraseBlocks(blockB, blockA, "pivot", morphMode);
+      }
+      hybrid.blocks.push(block);
+    }
+    return hybrid;
+  }
+
+  function commitCurrentMorph(sequence, morphMode) {
+    const mode = MORPH_MODE_LABELS[morphMode] ? morphMode : "balanced";
+    state.phraseMorphTrail.unshift({
+      id: core.createId("morph"),
+      label: "Morph " + MORPH_MODE_LABELS[mode],
+      notes: "",
+      savedAt: new Date().toISOString(),
+      mode: mode,
+      pinned: false,
+      sequence: core.deepClone(sequence),
+    });
+    state.phraseMorphTrail = trimPhraseMorphTrail(state.phraseMorphTrail);
+  }
+
+  function updateMorphTrailEntry(entryId, updater) {
+    state.phraseMorphTrail = trimPhraseMorphTrail(
+      state.phraseMorphTrail.map(function (entry) {
+        if (entry.id !== entryId) {
+          return entry;
+        }
+        return normalizePhraseMorphEntry(updater(core.deepClone(entry)));
+      })
+    );
+  }
+
+  function createMotifFromMorphEntry(entry, pattern) {
+    const summaryPattern = pattern || buildPhrasePatternFromSequence(entry.sequence);
+    const tags = ["morph", entry.mode];
+    if (entry.pinned) {
+      tags.push("pinned");
+    }
+    return core.createMotifFromPattern(summaryPattern, {
+      name: entry.label,
+      tags: Array.from(new Set(tags)),
+      difficulty: core.clamp(entry.sequence.blocks.length || 1, 1, 5),
+      style: "morph-" + entry.mode,
+      recommendedUse: entry.notes || "morph trail",
+      provenance: "morph-trail",
+    });
+  }
+
+  function isSameTransform(left, right) {
+    const a = normalizePhraseTransform(left);
+    const b = normalizePhraseTransform(right);
+    return (
+      a.diatonicShift === b.diatonicShift &&
+      a.chromaticShift === b.chromaticShift &&
+      a.reverse === b.reverse &&
+      a.stretch === b.stretch
+    );
+  }
+
+  function getBlockDiffKind(referenceBlock, currentBlock) {
+    if (referenceBlock && currentBlock) {
+      if (referenceBlock.motifId === currentBlock.motifId && isSameTransform(referenceBlock.transform, currentBlock.transform)) {
+        return "same";
+      }
+      if (referenceBlock.motifId === currentBlock.motifId) {
+        return "shifted";
+      }
+      return "replaced";
+    }
+    if (referenceBlock) {
+      return "removed";
+    }
+    return "added";
+  }
+
+  function labelBlockDiff(kind, referenceBlock, currentBlock) {
+    const currentName = currentBlock ? currentBlock.motifName : "None";
+    const referenceName = referenceBlock ? referenceBlock.motifName : "None";
+    if (kind === "same") {
+      return referenceName;
+    }
+    if (kind === "shifted") {
+      return currentName + " tweaked";
+    }
+    if (kind === "replaced") {
+      return referenceName + " -> " + currentName;
+    }
+    if (kind === "removed") {
+      return referenceName + " removed";
+    }
+    return currentName + " added";
+  }
+
+  function summarizeMorphDiff(referenceSequence, currentSequence) {
+    const current = currentSequence || core.createEmptyPhraseSequence();
+    const length = Math.max(referenceSequence.blocks.length, current.blocks.length);
+    const items = [];
+    const counts = {
+      same: 0,
+      shifted: 0,
+      replaced: 0,
+      added: 0,
+      removed: 0,
+    };
+    for (let index = 0; index < length; index += 1) {
+      const referenceBlock = referenceSequence.blocks[index] || null;
+      const currentBlock = current.blocks[index] || null;
+      const kind = getBlockDiffKind(referenceBlock, currentBlock);
+      counts[kind] += 1;
+      items.push({
+        index: index,
+        kind: kind,
+        label: labelBlockDiff(kind, referenceBlock, currentBlock),
+      });
+    }
+    return {
+      counts: counts,
+      items: items,
+    };
+  }
+
+  function renderPhraseSnapshots() {
+    elements.phraseSnapshotPanel.innerHTML = "";
+    const template = document.getElementById("phraseSnapshotTemplate");
+    ["a", "b"].forEach(function (slot) {
+      const snapshot = state.phraseSnapshots[slot];
+      const summary = snapshot ? summarizePhraseSequence(snapshot.sequence) : null;
+      const item = template.content.firstElementChild.cloneNode(true);
+      item.querySelector(".phrase-snapshot-name").textContent = "Snapshot " + slot.toUpperCase();
+      item.querySelector(".phrase-snapshot-badge").textContent = snapshot ? "Ready" : "Empty";
+      item.querySelector(".phrase-snapshot-meta").textContent = summary
+        ? summary.blockCount +
+          " blocks · " +
+          summary.stepCount +
+          " steps · " +
+          new Date(snapshot.savedAt).toLocaleTimeString()
+        : "Save the current phrase here for A/B comparison.";
+      item.querySelector(".phrase-snapshot-preview").textContent = summary
+        ? core.previewPattern(summary.pattern)
+        : "No snapshot yet.";
+      item.querySelectorAll("button").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const action = button.getAttribute("data-action");
+          if (action === "save") {
+            recordCheckpoint("Save phrase snapshot " + slot.toUpperCase());
+            createPhraseSnapshot(slot);
+          } else if (action === "play") {
+            if (!snapshot) {
+              return;
+            }
+            playPattern(summary.pattern, state.bpm);
+            return;
+          } else if (action === "load") {
+            if (!snapshot) {
+              return;
+            }
+            recordCheckpoint("Load phrase snapshot " + slot.toUpperCase());
+            state.phrase = core.deepClone(snapshot.sequence);
+            state.phraseSelection = { start: null, end: null };
+          } else if (action === "clear") {
+            if (!snapshot) {
+              return;
+            }
+            recordCheckpoint("Clear phrase snapshot " + slot.toUpperCase());
+            state.phraseSnapshots[slot] = null;
+          }
+          render();
+        });
+        if ((button.getAttribute("data-action") === "play" || button.getAttribute("data-action") === "load" || button.getAttribute("data-action") === "clear") && !snapshot) {
+          button.disabled = true;
+        }
+      });
+      elements.phraseSnapshotPanel.appendChild(item);
+    });
+  }
+
+  function renderPhraseSnapshotDiff() {
+    const snapshotA = state.phraseSnapshots.a;
+    const snapshotB = state.phraseSnapshots.b;
+    elements.phraseSnapshotDiff.innerHTML = "";
+    elements.phraseSnapshotDiff.classList.toggle("empty", !(snapshotA && snapshotB));
+    if (!(snapshotA && snapshotB)) {
+      elements.phraseSnapshotDiff.innerHTML =
+        "<strong>A/B Diff</strong><p class=\"phrase-diff-copy\">Save both Snapshot A and Snapshot B to see a direct phrase diff.</p>";
+      return;
+    }
+
+    const summaryA = summarizePhraseSequence(snapshotA.sequence);
+    const summaryB = summarizePhraseSequence(snapshotB.sequence);
+    const morphSequence = createMorphPhraseSequence(snapshotA.sequence, snapshotB.sequence, state.phraseMorphMode);
+    const morphSummary = summarizePhraseSequence(morphSequence);
+    const blockDelta = summaryB.blockCount - summaryA.blockCount;
+    const stepDelta = summaryB.stepCount - summaryA.stepCount;
+    const noteDelta = summaryB.noteCount - summaryA.noteCount;
+    const pcDelta = summaryB.pitchClassCount - summaryA.pitchClassCount;
+    const sameEnding = summaryA.lastLabel === summaryB.lastLabel;
+    const blockSequenceA = summaryA.blockLabels.join(" -> ") || "Empty";
+    const blockSequenceB = summaryB.blockLabels.join(" -> ") || "Empty";
+
+    elements.phraseSnapshotDiff.innerHTML =
+      "<strong>A/B Diff</strong>" +
+      '<p class="phrase-diff-copy">A 更适合保守复用，B 更适合扩展探索。下面是当前两版 phrase 的关键差异。</p>' +
+      '<div class="phrase-diff-grid">' +
+      '<div class="phrase-diff-metric"><strong>' + summaryA.blockCount + " / " + summaryB.blockCount + '</strong><span>Blocks (A/B)</span></div>' +
+      '<div class="phrase-diff-metric"><strong>' + summaryA.stepCount + " / " + summaryB.stepCount + '</strong><span>Steps (A/B)</span></div>' +
+      '<div class="phrase-diff-metric"><strong>' + summaryA.noteCount + " / " + summaryB.noteCount + '</strong><span>Notes (A/B)</span></div>' +
+      '<div class="phrase-diff-metric"><strong>' + summaryA.pitchClassCount + " / " + summaryB.pitchClassCount + '</strong><span>Pitch Classes (A/B)</span></div>' +
+      '<div class="phrase-diff-metric"><strong>' + (sameEnding ? "Same" : "Different") + '</strong><span>Ending Tone</span></div>' +
+      "</div>" +
+      '<div class="phrase-diff-row">' +
+      '<p class="phrase-diff-copy">Delta: blocks ' + formatSigned(blockDelta) + " · steps " + formatSigned(stepDelta) + " · notes " + formatSigned(noteDelta) + " · pitch classes " + formatSigned(pcDelta) + "</p>" +
+      '<p class="phrase-diff-copy">A: ' + blockSequenceA + "</p>" +
+      '<p class="phrase-diff-copy">B: ' + blockSequenceB + "</p>" +
+      '<p class="phrase-diff-copy">Ending: A ' + summaryA.lastLabel + " · B " + summaryB.lastLabel + "</p>" +
+      '<p class="phrase-diff-copy">Morph (' + MORPH_MODE_LABELS[state.phraseMorphMode] + '): ' + morphSummary.blockCount + " blocks · " + morphSummary.stepCount + " steps · ending " + morphSummary.lastLabel + "</p>" +
+      "</div>" +
+      '<div class="button-row compact-actions phrase-diff-morph-modes">' +
+      Object.keys(MORPH_MODE_LABELS)
+        .map(function (mode) {
+          return '<button data-action="set-morph-mode" data-mode="' + mode + '" class="' + (mode === state.phraseMorphMode ? "active" : "") + '">' + MORPH_MODE_LABELS[mode] + "</button>";
+        })
+        .join("") +
+      "</div>" +
+      '<div class="button-row compact-actions phrase-diff-actions">' +
+      '<button data-action="play-morph">试听 Morph</button>' +
+      '<button data-action="load-morph">载入 Morph</button>' +
+      '<button data-action="commit-morph">Commit Morph</button>' +
+      "</div>";
+    elements.phraseSnapshotDiff.querySelectorAll("button").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const action = button.getAttribute("data-action");
+        if (action === "set-morph-mode") {
+          state.phraseMorphMode = button.getAttribute("data-mode") || "balanced";
+          render();
+          return;
+        }
+        if (action === "play-morph") {
+          playPattern(morphSummary.pattern, state.bpm);
+          return;
+        }
+        if (action === "load-morph") {
+          recordCheckpoint("Load phrase morph");
+          state.phrase = core.deepClone(morphSequence);
+          state.phraseSelection = { start: null, end: null };
+          render();
+          return;
+        }
+        if (action === "commit-morph") {
+          recordCheckpoint("Commit phrase morph");
+          commitCurrentMorph(morphSequence, state.phraseMorphMode);
+          render();
+        }
+      });
+    });
+  }
+
+  function renderPhraseMorphTrail() {
+    elements.phraseMorphTrail.innerHTML = "";
+    elements.phraseMorphTrail.classList.toggle("empty", state.phraseMorphTrail.length === 0);
+    if (!state.phraseMorphTrail.length) {
+      elements.phraseMorphTrail.innerHTML =
+        "<strong>Morph Trail</strong><p class=\"phrase-morph-trail-copy\">Commit Morph from the A/B diff panel to keep multiple in-between versions available for preview and branching.</p>";
+      return;
+    }
+
+    const template = document.getElementById("phraseMorphTrailTemplate");
+    const head = document.createElement("div");
+    head.className = "phrase-morph-trail-head";
+    const pinnedCount = state.phraseMorphTrail.filter(function (entry) {
+      return entry.pinned;
+    }).length;
+    head.innerHTML =
+      "<div><strong>Morph Trail</strong><p class=\"phrase-morph-trail-copy\">Committed morphs stay here even while you keep changing A, B, or the current phrase. Pinned entries stay at the top and are protected from trail rollover. (" +
+      pinnedCount +
+      " pinned)</p></div>" +
+      '<div class="button-row compact-actions"><button data-action="clear-all">Clear Trail</button></div>';
+    head.querySelector("button").addEventListener("click", function () {
+      recordCheckpoint("Clear morph trail");
+      state.phraseMorphTrail = [];
+      render();
+    });
+    elements.phraseMorphTrail.appendChild(head);
+
+    const list = document.createElement("div");
+    list.className = "phrase-morph-trail-list";
+    const currentPattern = buildPhrasePattern();
+    sortPhraseMorphTrail(state.phraseMorphTrail).forEach(function (entry) {
+      const summary = summarizePhraseSequence(entry.sequence);
+      const diff = summarizeMorphDiff(entry.sequence, state.phrase);
+      const item = template.content.firstElementChild.cloneNode(true);
+      item.classList.toggle("pinned", Boolean(entry.pinned));
+      item.querySelector(".phrase-morph-name").textContent = entry.label;
+      item.querySelector(".phrase-morph-meta").textContent =
+        (MORPH_MODE_LABELS[entry.mode] || entry.mode) +
+        " | " +
+        summary.blockCount +
+        " blocks | " +
+        summary.stepCount +
+        " steps | " +
+        new Date(entry.savedAt).toLocaleTimeString();
+      item.querySelector(".phrase-morph-badge").textContent = entry.pinned
+        ? "Pinned · " + (MORPH_MODE_LABELS[entry.mode] || entry.mode)
+        : MORPH_MODE_LABELS[entry.mode] || entry.mode;
+      item.querySelector(".phrase-morph-preview").textContent = core.previewPattern(summary.pattern);
+      item.querySelector(".phrase-morph-notes").textContent = entry.notes
+        ? "Note: " + entry.notes
+        : "No notes yet. Use Edit to add a use-case or reminder.";
+      item.querySelector(".phrase-morph-notes").classList.toggle("empty", !entry.notes);
+      item.querySelector(".phrase-morph-diff-summary").textContent =
+        "Vs current: " +
+        diff.counts.same +
+        " same | " +
+        diff.counts.shifted +
+        " shifted | " +
+        diff.counts.replaced +
+        " replaced | " +
+        diff.counts.added +
+        " added | " +
+        diff.counts.removed +
+        " removed";
+      const lane = item.querySelector(".phrase-morph-diff-lane");
+      diff.items.forEach(function (diffItem) {
+        const chip = document.createElement("span");
+        chip.className = "phrase-morph-diff-chip " + diffItem.kind;
+        const indexBadge = document.createElement("span");
+        indexBadge.className = "phrase-morph-diff-index";
+        indexBadge.textContent = String(diffItem.index + 1);
+        const label = document.createElement("span");
+        label.textContent = diffItem.label;
+        chip.appendChild(indexBadge);
+        chip.appendChild(label);
+        lane.appendChild(chip);
+      });
+      renderMiniRollOverlay(item.querySelector('[data-role="compare-roll"]'), summary.pattern, currentPattern);
+      item.querySelectorAll("button").forEach(function (button) {
+        if (button.getAttribute("data-action") === "pin") {
+          button.textContent = entry.pinned ? "Unpin" : "Pin";
+        }
+        button.addEventListener("click", function () {
+          const action = button.getAttribute("data-action");
+          if (action === "edit") {
+            const nextLabel = window.prompt("Rename this morph", entry.label);
+            if (nextLabel == null) {
+              return;
+            }
+            const nextNotes = window.prompt(
+              "Add a short note for when or why to use this morph",
+              entry.notes || ""
+            );
+            if (nextNotes == null) {
+              return;
+            }
+            recordCheckpoint("Edit morph trail entry");
+            updateMorphTrailEntry(entry.id, function (candidate) {
+              candidate.label = nextLabel.trim() || candidate.label;
+              candidate.notes = nextNotes.trim();
+              return candidate;
+            });
+            render();
+            return;
+          }
+          if (action === "pin") {
+            recordCheckpoint((entry.pinned ? "Unpin " : "Pin ") + "morph trail entry");
+            updateMorphTrailEntry(entry.id, function (candidate) {
+              candidate.pinned = !candidate.pinned;
+              return candidate;
+            });
+            render();
+            return;
+          }
+          if (action === "play") {
+            playPattern(summary.pattern, state.bpm);
+            return;
+          }
+          if (action === "load") {
+            recordCheckpoint("Load morph trail entry");
+            state.phrase = core.deepClone(entry.sequence);
+            state.phraseSelection = { start: null, end: null };
+            render();
+            return;
+          }
+          if (action === "motif") {
+            recordCheckpoint("Create motif from morph trail");
+            state.motifLibrary.unshift(createMotifFromMorphEntry(entry, summary.pattern));
+            render();
+            return;
+          }
+          if (action === "save-a" || action === "save-b") {
+            const slot = action === "save-a" ? "a" : "b";
+            recordCheckpoint("Save morph to snapshot " + slot.toUpperCase());
+            createPhraseSnapshot(slot, entry.sequence, entry.label);
+            render();
+            return;
+          }
+          if (action === "delete") {
+            recordCheckpoint("Delete morph trail entry");
+            state.phraseMorphTrail = state.phraseMorphTrail.filter(function (candidate) {
+              return candidate.id !== entry.id;
+            });
+            render();
+          }
+        });
+      });
+      list.appendChild(item);
+    });
+    elements.phraseMorphTrail.appendChild(list);
+  }
+
+  function formatSigned(value) {
+    return value > 0 ? "+" + value : String(value);
+  }
+
+  function buildPhraseBlockPattern(block) {
+    const motif = state.motifLibrary.find(function (item) {
+      return item.id === block.motifId;
+    });
+    if (!motif) {
+      return null;
+    }
+    return core.transformPattern(motif.sourcePattern, block.transform, currentScale(), currentInstrument());
+  }
+
+  function renderMiniRoll(target, pattern, options) {
+    const opts = options || {};
+    target.innerHTML = "";
+    if (!pattern || !pattern.notes.length) {
+      target.classList.add("empty");
+      target.textContent = "No notes";
+      return;
+    }
+
+    target.classList.remove("empty");
+    target.textContent = "";
+    const notes = pattern.notes
+      .slice()
+      .sort(function (a, b) {
+        if (a.startStep !== b.startStep) {
+          return a.startStep - b.startStep;
+        }
+        return core.pitchSpecToMidi(b.pitch) - core.pitchSpecToMidi(a.pitch);
+      });
+    const pitchValues = notes.map(function (note) {
+      return core.pitchSpecToMidi(note.pitch);
+    });
+    const maxMidi = Math.max.apply(null, pitchValues);
+    const minMidi = Math.min.apply(null, pitchValues);
+    const rowCount = Math.max(1, maxMidi - minMidi + 1);
+    const stepCount = Math.max(
+      pattern.grid,
+      notes.reduce(function (max, note) {
+        return Math.max(max, note.startStep + note.durationSteps);
+      }, 1)
+    );
+
+    target.style.gridTemplateColumns = "repeat(" + stepCount + ", minmax(0, 1fr))";
+    target.style.gridTemplateRows = "repeat(" + rowCount + ", minmax(0, 1fr))";
+
+    notes.forEach(function (note) {
+      const midi = core.pitchSpecToMidi(note.pitch);
+      const pill = document.createElement("span");
+      pill.className = "phrase-mini-note" + (opts.ghost ? " ghost" : "");
+      pill.style.gridColumn = note.startStep + 1 + " / span " + Math.max(1, note.durationSteps);
+      pill.style.gridRow = maxMidi - midi + 1;
+      target.appendChild(pill);
+    });
+  }
+
+  function calculateRollMetrics(patterns) {
+    const notePool = [];
+    (patterns || []).forEach(function (pattern) {
+      if (pattern && Array.isArray(pattern.notes) && pattern.notes.length) {
+        pattern.notes.forEach(function (note) {
+          notePool.push(note);
+        });
+      }
+    });
+    if (!notePool.length) {
+      return null;
+    }
+    const pitchValues = notePool.map(function (note) {
+      return core.pitchSpecToMidi(note.pitch);
+    });
+    const maxMidi = Math.max.apply(null, pitchValues);
+    const minMidi = Math.min.apply(null, pitchValues);
+    const stepCount = Math.max(
+      1,
+      notePool.reduce(function (max, note) {
+        return Math.max(max, note.startStep + note.durationSteps);
+      }, 1)
+    );
+    return {
+      maxMidi: maxMidi,
+      rowCount: Math.max(1, maxMidi - minMidi + 1),
+      stepCount: stepCount,
+    };
+  }
+
+  function renderMiniRollOverlay(target, referencePattern, currentPattern) {
+    target.innerHTML = "";
+    const metrics = calculateRollMetrics([referencePattern, currentPattern]);
+    if (!metrics) {
+      target.classList.add("empty");
+      target.textContent = "No notes";
+      return;
+    }
+
+    target.classList.remove("empty");
+    target.textContent = "";
+    target.style.gridTemplateColumns = "repeat(" + metrics.stepCount + ", minmax(0, 1fr))";
+    target.style.gridTemplateRows = "repeat(" + metrics.rowCount + ", minmax(0, 1fr))";
+
+    [
+      { pattern: referencePattern, className: "compare-reference" },
+      { pattern: currentPattern, className: "compare-current" },
+    ].forEach(function (layer) {
+      if (!layer.pattern || !Array.isArray(layer.pattern.notes)) {
+        return;
+      }
+      layer.pattern.notes
+        .slice()
+        .sort(function (a, b) {
+          if (a.startStep !== b.startStep) {
+            return a.startStep - b.startStep;
+          }
+          return core.pitchSpecToMidi(a.pitch) - core.pitchSpecToMidi(b.pitch);
+        })
+        .forEach(function (note) {
+          const midi = core.pitchSpecToMidi(note.pitch);
+          const pill = document.createElement("span");
+          pill.className = "phrase-mini-note " + layer.className;
+          pill.style.gridColumn = note.startStep + 1 + " / span " + Math.max(1, note.durationSteps);
+          pill.style.gridRow = metrics.maxMidi - midi + 1;
+          target.appendChild(pill);
+        });
+    });
+  }
+
+  function hydrateMotifFilterControls() {
+    const styles = Array.from(
+      new Set(
+        state.motifLibrary
+          .map(function (motif) {
+            return motif.style;
+          })
+          .filter(Boolean)
+      )
+    ).sort();
+    elements.motifProvenanceFilter.innerHTML =
+      '<option value="all">All Sources</option>' +
+      Object.keys(MOTIF_PROVENANCE_LABELS)
+        .filter(function (key) {
+          return key !== "legacy";
+        })
+        .map(function (key) {
+          return '<option value="' + key + '">' + MOTIF_PROVENANCE_LABELS[key] + "</option>";
+        })
+        .join("");
+    elements.motifStyleFilter.innerHTML =
+      '<option value="all">All Styles</option>' +
+      styles
+        .map(function (style) {
+          return '<option value="' + style + '">' + style + "</option>";
+        })
+        .join("");
+    elements.motifProvenanceFilter.value = state.motifFilters.provenance;
+    elements.motifStyleFilter.value = styles.includes(state.motifFilters.style) ? state.motifFilters.style : "all";
+    elements.motifDifficultyFilter.value = state.motifFilters.difficulty;
+  }
+
+  function hydrateGeneratorPresetControls() {
+    elements.generatorPresetSelect.innerHTML = state.generatorPresets.length
+      ? state.generatorPresets
+          .map(function (preset) {
+            return '<option value="' + preset.id + '">' + preset.name + "</option>";
+          })
+          .join("")
+      : '<option value="">No presets yet</option>';
+    elements.generatorPresetSelect.value = state.selectedGeneratorPresetId || (state.generatorPresets[0] ? state.generatorPresets[0].id : "");
+    elements.applyGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.overwriteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.deleteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+  }
+
+  function createGeneratorPresetFromState(name) {
+    return {
+      id: core.createId("preset"),
+      name: name || "Generator Preset",
+      instrumentId: state.instrumentId,
+      scale: core.deepClone(state.scale),
+      generator: core.deepClone(state.generator),
+    };
+  }
+
+  function getSelectedGeneratorPreset() {
+    return state.generatorPresets.find(function (preset) {
+      return preset.id === state.selectedGeneratorPresetId;
+    }) || null;
+  }
+
+  function applyGeneratorPreset(preset) {
+    if (!preset) {
+      return;
+    }
+    state.generator = Object.assign({}, state.generator, core.deepClone(preset.generator));
+    state.scale = core.deepClone(preset.scale);
+    if (preset.instrumentId && state.instruments.some(function (instrument) { return instrument.id === preset.instrumentId; })) {
+      state.instrumentId = preset.instrumentId;
+      state.pattern = fitPatternForCurrentInstrument(state.pattern);
+    }
+  }
+
+  function getCurrentGeneratorContext() {
+    return {
+      instrumentId: state.instrumentId,
+      scale: core.deepClone(state.scale),
+      generator: core.deepClone(state.generator),
+    };
+  }
+
+  function getGeneratorPresetDiff(preset) {
+    if (!preset) {
+      return [];
+    }
+    const current = getCurrentGeneratorContext();
+    const diffs = [];
+    if (current.instrumentId !== preset.instrumentId) {
+      diffs.push("Instrument");
+    }
+    if (current.scale.rootPc !== preset.scale.rootPc || current.scale.modeName !== preset.scale.modeName) {
+      diffs.push("Scale");
+    }
+    [
+      ["density", "Density"],
+      ["maxLeap", "Max Leap"],
+      ["repeatRate", "Repeat Rate"],
+      ["surprise", "Surprise"],
+      ["tensionCurve", "Curve"],
+      ["mode", "Mode"],
+      ["preferredFormId", "Form"],
+      ["preferredCellId", "Cell"],
+      ["surpriseZone", "Surprise Zone"],
+    ].forEach(function (pair) {
+      const key = pair[0];
+      const label = pair[1];
+      if (String(current.generator[key]) !== String(preset.generator[key])) {
+        diffs.push(label);
+      }
+    });
+    return diffs;
+  }
+
+  function overwriteGeneratorPreset(presetId) {
+    const nextPreset = createGeneratorPresetFromState(
+      (state.generatorPresets.find(function (preset) {
+        return preset.id === presetId;
+      }) || {}).name || "Generator Preset"
+    );
+    state.generatorPresets = state.generatorPresets.map(function (preset) {
+      if (preset.id !== presetId) {
+        return preset;
+      }
+      nextPreset.id = preset.id;
+      return nextPreset;
+    });
+  }
+
+  function fitPatternForCurrentInstrument(pattern) {
+    return core.fitPatternToInstrument(pattern, currentInstrument(), currentScale());
+  }
+
+  function adoptPattern(pattern, options) {
+    const opts = options || {};
+    state.pattern = fitPatternForCurrentInstrument(core.deepClone(pattern));
+    state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
+    if (opts.viewMode) {
+      state.viewMode = opts.viewMode;
+      elements.viewMode.value = opts.viewMode;
+    }
+  }
+
   function hydrateControls() {
     elements.instrumentSelect.innerHTML = state.instruments
       .map(function (instrument) {
@@ -344,6 +1455,21 @@
       })
       .join("");
     elements.modeSelect.value = state.scale.modeName;
+    elements.generationFormLockSelect.innerHTML = Object.keys(GENERATION_FORM_LABELS)
+      .map(function (formId) {
+        return '<option value="' + formId + '">' + GENERATION_FORM_LABELS[formId] + "</option>";
+      })
+      .join("");
+    elements.generationCellLockSelect.innerHTML = Object.keys(GENERATION_CELL_LABELS)
+      .map(function (cellId) {
+        return '<option value="' + cellId + '">' + GENERATION_CELL_LABELS[cellId] + "</option>";
+      })
+      .join("");
+    elements.generationSurpriseZoneSelect.innerHTML = Object.keys(GENERATION_SURPRISE_ZONE_LABELS)
+      .map(function (zoneId) {
+        return '<option value="' + zoneId + '">' + GENERATION_SURPRISE_ZONE_LABELS[zoneId] + "</option>";
+      })
+      .join("");
 
     elements.signatureSelect.value = state.pattern.numerator + "/" + state.pattern.denominator;
     elements.gridSelect.value = String(state.pattern.grid);
@@ -357,7 +1483,12 @@
     elements.surpriseInput.value = String(state.generator.surprise);
     elements.tensionCurveSelect.value = state.generator.tensionCurve;
     elements.generationModeSelect.value = state.generator.mode;
+    elements.generationFormLockSelect.value = state.generator.preferredFormId || "auto";
+    elements.generationCellLockSelect.value = state.generator.preferredCellId || "auto";
+    elements.generationSurpriseZoneSelect.value = state.generator.surpriseZone || "auto";
     elements.motifSearchInput.value = state.motifSearch || "";
+    hydrateMotifFilterControls();
+    hydrateGeneratorPresetControls();
 
     elements.practiceModeSelect.value = state.practice.mode;
     elements.practiceDifficultyInput.value = String(state.practice.difficulty);
@@ -370,6 +1501,13 @@
     registerInteractiveCheckpoint(elements.noteDurationInput, "note-duration", "Edit note duration");
     registerInteractiveCheckpoint(elements.noteVelocityInput, "note-velocity", "Edit note velocity");
     registerInteractiveCheckpoint(elements.noteOffsetInput, "note-offset", "Edit note pitch offset");
+    registerInteractiveCheckpoint(elements.densityInput, "generator-density", "Adjust generator density");
+    registerInteractiveCheckpoint(elements.maxLeapInput, "generator-max-leap", "Adjust max leap");
+    registerInteractiveCheckpoint(elements.repeatRateInput, "generator-repeat-rate", "Adjust repeat rate");
+    registerInteractiveCheckpoint(elements.surpriseInput, "generator-surprise", "Adjust surprise");
+    registerInteractiveCheckpoint(elements.practiceDifficultyInput, "practice-difficulty", "Adjust practice difficulty");
+    registerInteractiveCheckpoint(elements.practiceLoopsInput, "practice-loops", "Adjust practice loops");
+    registerInteractiveCheckpoint(elements.practiceTempoLiftInput, "practice-tempo-lift", "Adjust practice tempo lift");
 
     elements.viewMode.addEventListener("change", function () {
       state.viewMode = elements.viewMode.value;
@@ -379,6 +1517,7 @@
     elements.instrumentSelect.addEventListener("change", function () {
       recordCheckpoint("Change instrument");
       state.instrumentId = elements.instrumentSelect.value;
+      state.pattern = fitPatternForCurrentInstrument(state.pattern);
       render();
     });
 
@@ -431,6 +1570,7 @@
       };
       state.instruments.push(instrument);
       state.instrumentId = instrument.id;
+      state.pattern = fitPatternForCurrentInstrument(state.pattern);
       hydrateControls();
       render();
     });
@@ -441,8 +1581,83 @@
     elements.surpriseInput.addEventListener("input", syncGeneratorSettings);
     elements.tensionCurveSelect.addEventListener("change", syncGeneratorSettings);
     elements.generationModeSelect.addEventListener("change", syncGeneratorSettings);
+    elements.generationFormLockSelect.addEventListener("change", syncGeneratorSettings);
+    elements.generationCellLockSelect.addEventListener("change", syncGeneratorSettings);
+    elements.generationSurpriseZoneSelect.addEventListener("change", syncGeneratorSettings);
+    elements.generatorPresetSelect.addEventListener("change", function () {
+      state.selectedGeneratorPresetId = elements.generatorPresetSelect.value || null;
+      render();
+    });
+    elements.saveGeneratorPresetBtn.addEventListener("click", function () {
+      const suggestedName =
+        core.NOTE_NAMES[state.scale.rootPc] +
+        " " +
+        state.scale.modeName +
+        " " +
+        (GENERATION_MODE_LABELS[state.generator.mode] || state.generator.mode);
+      const name = window.prompt("Preset name", suggestedName);
+      if (!name) {
+        return;
+      }
+      recordCheckpoint("Save generator preset");
+      const preset = createGeneratorPresetFromState(name.trim() || suggestedName);
+      state.generatorPresets.unshift(preset);
+      state.selectedGeneratorPresetId = preset.id;
+      hydrateControls();
+      render();
+    });
+    elements.applyGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      recordCheckpoint("Apply generator preset");
+      applyGeneratorPreset(preset);
+      hydrateControls();
+      render();
+    });
+    elements.overwriteGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      recordCheckpoint("Overwrite generator preset");
+      overwriteGeneratorPreset(preset.id);
+      hydrateControls();
+      render();
+    });
+    elements.deleteGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      recordCheckpoint("Delete generator preset");
+      state.generatorPresets = state.generatorPresets.filter(function (entry) {
+        return entry.id !== preset.id;
+      });
+      state.selectedGeneratorPresetId = normalizeGeneratorPresetId(null, state.generatorPresets);
+      hydrateControls();
+      render();
+    });
     elements.motifSearchInput.addEventListener("input", function () {
       state.motifSearch = elements.motifSearchInput.value;
+      render();
+    });
+    elements.motifProvenanceFilter.addEventListener("change", function () {
+      state.motifFilters.provenance = elements.motifProvenanceFilter.value;
+      render();
+    });
+    elements.motifStyleFilter.addEventListener("change", function () {
+      state.motifFilters.style = elements.motifStyleFilter.value;
+      render();
+    });
+    elements.motifDifficultyFilter.addEventListener("change", function () {
+      state.motifFilters.difficulty = elements.motifDifficultyFilter.value;
+      render();
+    });
+    elements.clearMotifFiltersBtn.addEventListener("click", function () {
+      state.motifSearch = "";
+      state.motifFilters = normalizeMotifFilters();
       render();
     });
 
@@ -464,6 +1679,9 @@
         surprise: state.generator.surprise,
         tensionCurve: state.generator.tensionCurve,
         mode: state.generator.mode,
+        preferredFormId: state.generator.preferredFormId,
+        preferredCellId: state.generator.preferredCellId,
+        surpriseZone: state.generator.surpriseZone,
       });
       pushHistory(state.pattern, "Generate");
       state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
@@ -556,10 +1774,12 @@
     elements.clearPhraseBtn.addEventListener("click", function () {
       recordCheckpoint("Clear phrase");
       state.phrase.blocks = [];
+      state.phraseSelection = { start: null, end: null };
       render();
     });
 
     elements.phraseLoopCountSelect.addEventListener("change", function () {
+      recordCheckpoint("Change phrase loop count");
       state.phraseLoopCount = Number(elements.phraseLoopCountSelect.value);
       render();
     });
@@ -587,23 +1807,7 @@
       if (!state.practice.pack) {
         return;
       }
-      const merged = core.createEmptyPattern({
-        name: "Practice Pack",
-        grid: state.practice.pack.drills.reduce(function (sum, drill) {
-          return sum + drill.pattern.grid;
-        }, 0),
-      });
-      let offset = 0;
-      state.practice.pack.drills.forEach(function (drill) {
-        drill.pattern.notes.forEach(function (note) {
-          const clone = core.deepClone(note);
-          clone.id = core.createId("note");
-          clone.startStep += offset;
-          merged.notes.push(clone);
-        });
-        offset += drill.pattern.grid;
-      });
-      playPattern(merged, state.bpm + state.practice.tempoLift);
+      playPracticePack(state.practice.pack);
     });
 
     elements.playPatternBtn.addEventListener("click", function () {
@@ -614,6 +1818,15 @@
     });
     elements.playPhraseLoopBtn.addEventListener("click", function () {
       playPattern(buildPhrasePattern(), state.bpm, {
+        loops: state.phraseLoopCount,
+      });
+    });
+    elements.playPhraseSelectionBtn.addEventListener("click", function () {
+      const selectionPattern = buildPhrasePatternFromSelection();
+      if (!selectionPattern) {
+        return;
+      }
+      playPattern(selectionPattern, state.bpm, {
         loops: state.phraseLoopCount,
       });
     });
@@ -664,12 +1877,24 @@
   }
 
   function syncGeneratorSettings() {
+    if (
+      state.generator.tensionCurve !== elements.tensionCurveSelect.value ||
+      state.generator.mode !== elements.generationModeSelect.value ||
+      state.generator.preferredFormId !== elements.generationFormLockSelect.value ||
+      state.generator.preferredCellId !== elements.generationCellLockSelect.value ||
+      state.generator.surpriseZone !== elements.generationSurpriseZoneSelect.value
+    ) {
+      recordCheckpoint("Change generator mode");
+    }
     state.generator.density = Number(elements.densityInput.value);
     state.generator.maxLeap = Number(elements.maxLeapInput.value);
     state.generator.repeatRate = Number(elements.repeatRateInput.value);
     state.generator.surprise = Number(elements.surpriseInput.value);
     state.generator.tensionCurve = elements.tensionCurveSelect.value;
     state.generator.mode = elements.generationModeSelect.value;
+    state.generator.preferredFormId = elements.generationFormLockSelect.value;
+    state.generator.preferredCellId = elements.generationCellLockSelect.value;
+    state.generator.surpriseZone = elements.generationSurpriseZoneSelect.value;
     render();
   }
 
@@ -695,6 +1920,7 @@
     elements.practiceTempoLiftValue.textContent = "+" + state.practice.tempoLift + " BPM";
     elements.undoBtn.disabled = state.undoStack.length === 0;
     elements.redoBtn.disabled = state.redoStack.length === 0;
+    elements.playPhraseSelectionBtn.disabled = state.phraseSelection.start == null;
     elements.playPhraseLoopBtn.disabled = state.phrase.blocks.length === 0;
     elements.stateStatus.textContent =
       "Undo " + state.undoStack.length + " · Redo " + state.redoStack.length + " · Autosaved";
@@ -719,8 +1945,32 @@
       " / 惊喜度 " +
       state.generator.surprise.toFixed(2) +
       " / " +
-      state.generator.mode;
+      (GENERATION_MODE_LABELS[state.generator.mode] || state.generator.mode) +
+      " / Form " +
+      (GENERATION_FORM_LABELS[state.generator.preferredFormId] || "自动") +
+      " / Cell " +
+      (GENERATION_CELL_LABELS[state.generator.preferredCellId] || "自动") +
+      " / Surprise " +
+      (GENERATION_SURPRISE_ZONE_LABELS[state.generator.surpriseZone] || "自动");
+    const selectedPreset = getSelectedGeneratorPreset();
+    elements.generatorPresetSummary.textContent = selectedPreset
+      ? "Preset: " +
+        selectedPreset.name +
+        " | " +
+        core.NOTE_NAMES[selectedPreset.scale.rootPc] +
+        " " +
+        selectedPreset.scale.modeName +
+        " | " +
+        (GENERATION_MODE_LABELS[selectedPreset.generator.mode] || selectedPreset.generator.mode)
+      : "Preset: none yet. Save the current generator setup to reuse it later.";
+    const presetDiff = getGeneratorPresetDiff(selectedPreset);
+    elements.generatorPresetDiff.textContent = selectedPreset
+      ? (presetDiff.length
+        ? "Current differs from preset in: " + presetDiff.join(" | ")
+        : "Current matches the selected preset.")
+      : "";
 
+    renderGenerationModePreview();
     renderGenerationBlocks();
     renderPitchClassGrid();
     renderInstrumentLibrary();
@@ -728,6 +1978,9 @@
     renderSelectedNoteEditor();
     renderMotifLibrary();
     renderHistory();
+    renderPhraseSnapshots();
+    renderPhraseSnapshotDiff();
+    renderPhraseMorphTrail();
     renderPhraseInspector();
     renderPhraseTimeline();
     renderPracticePanel();
@@ -758,6 +2011,8 @@
         block.rhythmCell +
         " · notes " +
         block.noteCount +
+        " · surprise x" +
+        block.surpriseBias.toFixed(2) +
         "</p>";
       elements.generationBlocks.appendChild(item);
     });
@@ -784,8 +2039,7 @@
             playPattern(entry.pattern, state.bpm);
           } else if (action === "load") {
             recordCheckpoint("Load history snapshot");
-            state.pattern = core.deepClone(entry.pattern);
-            state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
+            adoptPattern(entry.pattern);
           } else if (action === "motif") {
             recordCheckpoint("Create motif from history");
             state.motifLibrary.unshift(
@@ -794,6 +2048,7 @@
                 tags: ["history", state.generator.mode],
                 difficulty: 3,
                 style: "snapshot",
+                provenance: "history",
               })
             );
           } else if (action === "phrase") {
@@ -803,6 +2058,7 @@
               tags: ["history"],
               difficulty: 3,
               style: "snapshot",
+              provenance: "history",
             });
             state.motifLibrary.unshift(historyMotif);
             core.addMotifToPhrase(state.phrase, historyMotif);
@@ -855,6 +2111,7 @@
           if (action === "use") {
             recordCheckpoint("Use instrument");
             state.instrumentId = instrument.id;
+            state.pattern = fitPatternForCurrentInstrument(state.pattern);
           } else if (action === "edit") {
             const nextName = window.prompt("Instrument name", instrument.name);
             if (!nextName) {
@@ -866,6 +2123,9 @@
             const nextMax = window.prompt("Maximum MIDI", String(instrument.maxMidi));
             instrument.minMidi = core.clamp(Number(nextMin || instrument.minMidi), 0, 127);
             instrument.maxMidi = core.clamp(Number(nextMax || instrument.maxMidi), instrument.minMidi, 127);
+            if (state.instrumentId === instrument.id) {
+              state.pattern = fitPatternForCurrentInstrument(state.pattern);
+            }
           } else if (action === "delete") {
             if (state.instruments.length === 1) {
               window.alert("At least one instrument must remain in the library.");
@@ -899,6 +2159,7 @@
       toggle.type = "checkbox";
       toggle.checked = !!state.scale.enabledMask[pc];
       toggle.addEventListener("change", function () {
+        recordCheckpoint("Edit scale mask");
         state.scale.enabledMask[pc] = toggle.checked;
         render();
       });
@@ -913,6 +2174,7 @@
       offsetInput.step = "5";
       offsetInput.value = String(state.scale.pitchOffsets[pc] || 0);
       offsetInput.addEventListener("change", function () {
+        recordCheckpoint("Edit pitch offset");
         state.scale.pitchOffsets[pc] = Number(offsetInput.value);
         render();
       });
@@ -1019,14 +2281,48 @@
 
   function renderMotifLibrary() {
     const query = (state.motifSearch || "").trim().toLowerCase();
+    const filters = normalizeMotifFilters(state.motifFilters);
+    state.motifFilters = filters;
+    elements.motifSearchInput.value = state.motifSearch || "";
+    hydrateMotifFilterControls();
     const visibleMotifs = state.motifLibrary.filter(function (motif) {
       if (!query) {
         return true;
       }
-      const haystack = [motif.name, motif.style].concat(motif.tags).join(" ").toLowerCase();
-      return haystack.includes(query);
+      const haystack = [motif.name, motif.style, motif.provenance, motif.recommendedUse].concat(motif.tags).join(" ").toLowerCase();
+      if (!haystack.includes(query)) {
+        return false;
+      }
+      return true;
+    }).filter(function (motif) {
+      if (filters.provenance !== "all" && motif.provenance !== filters.provenance) {
+        return false;
+      }
+      if (filters.style !== "all" && motif.style !== filters.style) {
+        return false;
+      }
+      if (filters.difficulty !== "all" && String(motif.difficulty) !== filters.difficulty) {
+        return false;
+      }
+      return true;
     });
     elements.motifCount.textContent = visibleMotifs.length + " motifs";
+    const filterSummaryParts = [];
+    if (query) {
+      filterSummaryParts.push('Search "' + state.motifSearch + '"');
+    }
+    if (filters.provenance !== "all") {
+      filterSummaryParts.push(MOTIF_PROVENANCE_LABELS[filters.provenance]);
+    }
+    if (filters.style !== "all") {
+      filterSummaryParts.push("Style " + filters.style);
+    }
+    if (filters.difficulty !== "all") {
+      filterSummaryParts.push("Diff " + filters.difficulty);
+    }
+    elements.motifFilterSummary.textContent = filterSummaryParts.length
+      ? "Filters: " + filterSummaryParts.join(" | ")
+      : "Filters: All motifs";
     elements.motifLibrary.innerHTML = "";
     const template = document.getElementById("motifCardTemplate");
     visibleMotifs.forEach(function (motif) {
@@ -1034,6 +2330,11 @@
       card.querySelector(".motif-name").textContent = motif.name;
       card.querySelector(".motif-meta").textContent =
         motif.style + " · diff " + motif.difficulty + " · " + (motif.tags.join(", ") || "untagged");
+      card.querySelector(".motif-provenance").textContent =
+        "From " +
+        (MOTIF_PROVENANCE_LABELS[motif.provenance] || MOTIF_PROVENANCE_LABELS.legacy) +
+        " · " +
+        (motif.recommendedUse || "idea starter");
       card.querySelector(".motif-badge").textContent = core.NOTE_NAMES[motif.sourcePattern.notes[0] ? motif.sourcePattern.notes[0].pitch.pc : state.scale.rootPc];
       card.querySelector(".motif-preview").textContent = core.previewPattern(motif.sourcePattern);
       card.querySelectorAll("button").forEach(function (button) {
@@ -1043,8 +2344,7 @@
             playPattern(motif.sourcePattern, state.bpm);
           } else if (action === "load") {
             recordCheckpoint("Load motif");
-            state.pattern = core.deepClone(motif.sourcePattern);
-            state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
+            adoptPattern(motif.sourcePattern);
           } else if (action === "phrase") {
             recordCheckpoint("Add motif to phrase");
             core.addMotifToPhrase(state.phrase, motif);
@@ -1057,14 +2357,15 @@
                 tags: motif.tags.concat(["sequence"]),
                 difficulty: core.clamp(motif.difficulty + 1, 1, 5),
                 style: motif.style,
+                provenance: "motif-derived",
               }
             );
             state.motifLibrary.unshift(transposed);
           } else if (action === "answer") {
-            recordCheckpoint("Create response motif");
+            recordCheckpoint("Create tail motif");
             const answerPattern = core.generatePattern({
               pattern: core.createEmptyPattern({
-                name: motif.name + " Answer",
+                name: motif.name + " Tail",
                 grid: motif.sourcePattern.grid,
                 numerator: motif.sourcePattern.numerator,
                 denominator: motif.sourcePattern.denominator,
@@ -1074,17 +2375,18 @@
               instrumentProfile: currentInstrument(),
               density: 0.45,
               maxLeap: 6,
-              repeatRate: 0.3,
-              surprise: 0.42,
+              repeatRate: 0.26,
+              surprise: 0.18,
               tensionCurve: "fall",
-              mode: "response",
+              mode: "tail",
             });
             state.motifLibrary.unshift(
               core.createMotifFromPattern(answerPattern, {
                 name: motif.name + " Tail",
-                tags: motif.tags.concat(["response"]),
+                tags: motif.tags.concat(["tail"]),
                 difficulty: motif.difficulty,
-                style: "answer",
+                style: "tail",
+                provenance: "motif-derived",
               })
             );
           } else if (action === "duplicate") {
@@ -1095,6 +2397,7 @@
                 tags: motif.tags.slice(),
                 difficulty: motif.difficulty,
                 style: motif.style,
+                provenance: "motif-derived",
               })
             );
           } else if (action === "edit") {
@@ -1104,6 +2407,11 @@
             }
             recordCheckpoint("Edit motif");
             motif.name = nextName.trim() || motif.name;
+            state.phrase.blocks.forEach(function (block) {
+              if (block.motifId === motif.id) {
+                block.motifName = motif.name;
+              }
+            });
             const nextStyle = window.prompt("Motif style", motif.style);
             motif.style = (nextStyle || motif.style).trim() || motif.style;
             const nextTags = window.prompt("Motif tags (comma separated)", motif.tags.join(", "));
@@ -1140,10 +2448,25 @@
   function renderPhraseTimeline() {
     elements.phraseTimeline.innerHTML = "";
     const template = document.getElementById("phraseBlockTemplate");
+    state.phraseSelection = normalizePhraseSelection(state.phraseSelection, state.phrase.blocks.length);
+    let phraseOffset = 0;
     state.phrase.blocks.forEach(function (block, index) {
       block.transform = normalizePhraseTransform(block.transform);
+      const motif = state.motifLibrary.find(function (item) {
+        return item.id === block.motifId;
+      });
+      const transformedPattern = motif ? buildPhraseBlockPattern(block) : null;
+      const blockOffset = phraseOffset;
       const item = template.content.firstElementChild.cloneNode(true);
-      item.querySelector(".phrase-block-name").textContent = block.motifName;
+      item.draggable = true;
+      item.dataset.index = String(index);
+      if (state.phraseSelection.start != null && index >= state.phraseSelection.start && index <= state.phraseSelection.end) {
+        item.classList.add("selected-range");
+      }
+      if (index === state.phraseSelection.start || index === state.phraseSelection.end) {
+        item.classList.add("selection-edge");
+      }
+      item.querySelector(".phrase-block-name").textContent = motif ? motif.name : block.motifName;
       item.querySelector(".phrase-block-meta").textContent =
         "顺阶 " +
         (block.transform.diatonicShift >= 0 ? "+" : "") +
@@ -1155,10 +2478,65 @@
         (block.transform.reverse ? "yes" : "no") +
         " · stretch x" +
         block.transform.stretch;
+      item.querySelector('[data-role="source-preview"]').textContent = motif
+        ? core.previewPattern(motif.sourcePattern)
+        : "原始 motif 已不存在";
+      renderMiniRoll(item.querySelector('[data-role="source-roll"]'), motif ? motif.sourcePattern : null, {
+        ghost: true,
+      });
+      item.querySelector('[data-role="block-preview"]').textContent = transformedPattern
+        ? core.previewPattern(transformedPattern)
+        : "无法生成当前 block";
+      renderMiniRoll(item.querySelector('[data-role="block-roll"]'), transformedPattern);
+      item.querySelector('[data-role="phrase-preview"]').textContent = transformedPattern
+        ? transformedPattern.notes
+            .slice()
+            .sort(function (a, b) {
+              return a.startStep - b.startStep;
+            })
+            .map(function (note) {
+              return core.pitchSpecToLabel(note.pitch) + " @" + (note.startStep + blockOffset);
+            })
+            .slice(0, 8)
+            .join(" · ")
+        : "没有落地片段";
+      renderMiniRoll(
+        item.querySelector('[data-role="phrase-roll"]'),
+        transformedPattern
+          ? Object.assign({}, transformedPattern, {
+              notes: transformedPattern.notes.map(function (note) {
+                const clone = core.deepClone(note);
+                clone.startStep += blockOffset;
+                return clone;
+              }),
+              grid: transformedPattern.grid + blockOffset,
+            })
+          : null
+      );
       item.querySelectorAll("button").forEach(function (button) {
         button.addEventListener("click", function () {
-          recordCheckpoint("Edit phrase block");
           const action = button.getAttribute("data-action");
+          if (action === "play-source") {
+            if (motif) {
+              playPattern(motif.sourcePattern, state.bpm);
+            }
+            return;
+          }
+          if (action === "play-block") {
+            if (transformedPattern) {
+              playPattern(transformedPattern, state.bpm);
+            }
+            return;
+          }
+          if (action === "load-block") {
+            if (transformedPattern) {
+              recordCheckpoint("Load phrase block");
+              adoptPattern(transformedPattern);
+              render();
+            }
+            return;
+          }
+          recordCheckpoint("Edit phrase block");
           if (action === "diatonic-down") {
             block.transform.diatonicShift -= 1;
           } else if (action === "diatonic-up") {
@@ -1187,13 +2565,105 @@
           render();
         });
       });
+      item.addEventListener("click", function (event) {
+        if (event.target.closest("button")) {
+          return;
+        }
+        if (event.shiftKey && state.phraseSelection.start != null) {
+          state.phraseSelection = normalizePhraseSelection(
+            {
+              start: state.phraseSelection.start,
+              end: index,
+            },
+            state.phrase.blocks.length
+          );
+        } else {
+          state.phraseSelection = {
+            start: index,
+            end: index,
+          };
+        }
+        render();
+      });
+      item.addEventListener("dragstart", function (event) {
+        interactionState.phraseDrag = {
+          index: index,
+          copy: !!event.altKey,
+          side: "after",
+        };
+        item.classList.add("dragging");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = interactionState.phraseDrag.copy ? "copyMove" : "move";
+          event.dataTransfer.setData("text/plain", String(index));
+        }
+      });
+      item.addEventListener("dragover", function (event) {
+        if (!interactionState.phraseDrag) {
+          return;
+        }
+        event.preventDefault();
+        const bounds = item.getBoundingClientRect();
+        const side = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+        interactionState.phraseDrag.side = side;
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = interactionState.phraseDrag.copy ? "copy" : "move";
+        }
+        clearPhraseDropTargets();
+        item.classList.add("drop-target");
+        item.classList.add(side === "before" ? "drop-before" : "drop-after");
+      });
+      item.addEventListener("dragleave", function () {
+        item.classList.remove("drop-target", "drop-before", "drop-after");
+      });
+      item.addEventListener("drop", function (event) {
+        if (!interactionState.phraseDrag) {
+          return;
+        }
+        event.preventDefault();
+        const dragState = interactionState.phraseDrag;
+        interactionState.phraseDrag = null;
+        clearPhraseDropTargets();
+        if (dragState.index === index && !dragState.copy) {
+          render();
+          return;
+        }
+        recordCheckpoint(dragState.copy ? "Duplicate phrase block by drag" : "Reorder phrase blocks");
+        const dragged = state.phrase.blocks[dragState.index];
+        if (!dragged) {
+          render();
+          return;
+        }
+        const insertionIndex = index + (dragState.side === "after" ? 1 : 0);
+        if (dragState.copy) {
+          const clone = core.deepClone(dragged);
+          clone.id = core.createId("block");
+          state.phrase.blocks.splice(insertionIndex, 0, clone);
+        } else {
+          const moved = state.phrase.blocks.splice(dragState.index, 1)[0];
+          const targetIndex = dragState.index < insertionIndex ? insertionIndex - 1 : insertionIndex;
+          state.phrase.blocks.splice(targetIndex, 0, moved);
+        }
+        render();
+      });
+      item.addEventListener("dragend", function () {
+        interactionState.phraseDrag = null;
+        item.classList.remove("dragging", "drop-target", "drop-before", "drop-after");
+        clearPhraseDropTargets();
+      });
       elements.phraseTimeline.appendChild(item);
+      phraseOffset += transformedPattern ? transformedPattern.grid : 0;
     });
 
     if (!state.phrase.blocks.length) {
       elements.phraseTimeline.innerHTML =
         '<article class="phrase-block"><h4>Phrase 还是空的</h4><p class="phrase-block-meta">在 Motif Library 里把喜欢的块加入这里，就能像积木一样拼成长句。</p></article>';
     }
+  }
+
+  function clearPhraseDropTargets() {
+    elements.phraseTimeline.querySelectorAll(".phrase-block").forEach(function (node) {
+      node.classList.remove("drop-target", "drop-before", "drop-after");
+    });
   }
 
   function renderPracticePanel() {
@@ -1225,10 +2695,8 @@
           if (action === "play") {
             playPattern(drill.pattern, drill.bpm);
           } else if (action === "load") {
-            state.pattern = core.deepClone(drill.pattern);
-            state.selectedNoteId = state.pattern.notes[0] ? state.pattern.notes[0].id : null;
-            state.viewMode = "compose";
-            elements.viewMode.value = "compose";
+            recordCheckpoint("Load practice drill");
+            adoptPattern(drill.pattern, { viewMode: "compose" });
           }
           render();
         });
@@ -1288,6 +2756,7 @@
       difficulty: Number(elements.motifDifficultySelect.value),
       style: elements.motifStyleInput.value.trim() || "organic",
       recommendedUse: "phrase block",
+      provenance: "pattern",
     });
     state.motifLibrary.unshift(motif);
     elements.motifNameInput.value = "";
@@ -1403,6 +2872,62 @@
 
   function getPatternPlaybackDuration(pattern, bpm) {
     return Math.max(pattern.grid, 1) * core.stepDurationSeconds(bpm) + 0.08;
+  }
+
+  function renderGenerationModePreview() {
+    elements.generationModePreview.innerHTML = "";
+    Object.keys(GENERATION_MODE_LABELS).forEach(function (mode) {
+      const preview = GENERATION_MODE_PREVIEWS[mode];
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "mode-preview-card";
+      if (mode === state.generator.mode) {
+        card.classList.add("active");
+      }
+      card.innerHTML =
+        '<div class="mode-preview-head"><strong>' +
+        GENERATION_MODE_LABELS[mode] +
+        '</strong><span class="panel-tag small-tag">' +
+        preview.family +
+        "</span></div>" +
+        '<div class="mode-preview-curve">' +
+        preview.contour
+          .map(function (value) {
+            return (
+              '<span class="mode-preview-bar" style="height:' +
+              Math.round(24 + value * 34) +
+              'px"></span>'
+            );
+          })
+          .join("") +
+        "</div>" +
+        '<p class="mode-preview-copy">' +
+        preview.tagline +
+        "</p>" +
+        '<p class="mode-preview-traits">' +
+        preview.traits.join(" · ") +
+        "</p>";
+      card.addEventListener("click", function () {
+        if (state.generator.mode === mode) {
+          return;
+        }
+        recordCheckpoint("Switch generator preview mode");
+        state.generator.mode = mode;
+        elements.generationModeSelect.value = mode;
+        render();
+      });
+      elements.generationModePreview.appendChild(card);
+    });
+  }
+
+  function playPracticePack(pack) {
+    stopPlayback();
+    const ctx = ensureAudioContext();
+    let cursor = ctx.currentTime + 0.05;
+    pack.drills.forEach(function (drill, index) {
+      schedulePatternPlayback(ctx, drill.pattern, drill.bpm, cursor, index);
+      cursor += getPatternPlaybackDuration(drill.pattern, drill.bpm);
+    });
   }
 
   function playPattern(pattern, bpm, options) {
