@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Mozart - Organic Lick Forge</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero-bar">
+        <div>
+          <p class="eyebrow">Project Mozart</p>
+          <h1>Organic Lick Forge</h1>
+          <p class="hero-copy">
+            为吉他 / 贝斯手打造的卡通式旋律实验台。生成、堆叠、练习单线条
+            lick，让灵感和肌肉记忆一起长出来。
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <label class="control compact">
+            <span>视图</span>
+            <select id="viewMode">
+              <option value="compose">创作视图</option>
+              <option value="practice">练习视图</option>
+            </select>
+          </label>
+
+          <div class="button-row">
+            <button id="playPatternBtn" class="primary-button">播放 Pattern</button>
+            <button id="playPhraseBtn">播放 Phrase</button>
+            <button id="stopPlaybackBtn">停止</button>
+            <button id="exportMidiBtn">导出 MIDI</button>
+          </div>
+
+          <div class="button-row">
+            <button id="undoBtn">撤销</button>
+            <button id="redoBtn">重做</button>
+            <button id="exportProjectBtn">导出工程</button>
+            <button id="importProjectBtn">导入工程</button>
+            <input id="importProjectInput" type="file" accept=".json,application/json" hidden />
+          </div>
+
+          <div class="button-row">
+            <span id="stateStatus" class="panel-tag">Autosaved</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel sky-panel setup-panel">
+          <div class="panel-title-row">
+            <h2>工程设定</h2>
+            <button id="resetProjectBtn" class="ghost-button">重置工程</button>
+          </div>
+
+          <div class="grid-form">
+            <label class="control">
+              <span>配器</span>
+              <select id="instrumentSelect"></select>
+            </label>
+
+            <label class="control">
+              <span>根音</span>
+              <select id="rootSelect"></select>
+            </label>
+
+            <label class="control">
+              <span>调式</span>
+              <select id="modeSelect"></select>
+            </label>
+
+            <label class="control">
+              <span>拍号</span>
+              <select id="signatureSelect">
+                <option value="4/4">4/4</option>
+                <option value="3/4">3/4</option>
+                <option value="5/4">5/4</option>
+                <option value="7/8">7/8</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>步进数</span>
+              <select id="gridSelect">
+                <option value="16">16</option>
+                <option value="24">24</option>
+                <option value="32">32</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>BPM</span>
+              <input id="bpmInput" type="range" min="60" max="180" step="1" />
+              <strong id="bpmValue"></strong>
+            </label>
+          </div>
+
+          <div class="custom-instrument">
+            <h3>自定义配器</h3>
+            <div class="grid-form compact-grid">
+              <label class="control">
+                <span>名称</span>
+                <input id="customInstrumentName" type="text" placeholder="Sky Lead" />
+              </label>
+              <label class="control">
+                <span>最低 MIDI</span>
+                <input id="customInstrumentMin" type="number" min="24" max="84" value="40" />
+              </label>
+              <label class="control">
+                <span>最高 MIDI</span>
+                <input id="customInstrumentMax" type="number" min="48" max="108" value="76" />
+              </label>
+              <label class="control">
+                <span>波形</span>
+                <select id="customInstrumentWave">
+                  <option value="triangle">Triangle</option>
+                  <option value="sine">Sine</option>
+                  <option value="square">Square</option>
+                  <option value="sawtooth">Saw</option>
+                </select>
+              </label>
+            </div>
+            <button id="addInstrumentBtn">加入配器列表</button>
+          </div>
+
+          <div class="instrument-library">
+            <div class="panel-title-row mini">
+              <h3>配器库</h3>
+              <span id="instrumentCount" class="panel-tag">0</span>
+            </div>
+            <div id="instrumentLibrary" class="instrument-library-list"></div>
+          </div>
+
+          <div class="scale-builder">
+            <div class="panel-title-row mini">
+              <h3>12 音与精确 pitch</h3>
+              <button id="applyModeMaskBtn" class="ghost-button">按调式重置</button>
+            </div>
+            <div id="pitchClassGrid" class="pitch-class-grid"></div>
+          </div>
+        </section>
+
+        <section class="panel meadow-panel generator-panel">
+          <div class="panel-title-row">
+            <h2>Generator Forge</h2>
+            <span class="panel-tag">规则 + 可控随机</span>
+          </div>
+
+          <div class="grid-form">
+            <label class="control">
+              <span>密度</span>
+              <input id="densityInput" type="range" min="0.1" max="1" step="0.05" />
+              <strong id="densityValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>最大跳进</span>
+              <input id="maxLeapInput" type="range" min="1" max="12" step="1" />
+              <strong id="maxLeapValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>重复率</span>
+              <input id="repeatRateInput" type="range" min="0" max="0.95" step="0.05" />
+              <strong id="repeatRateValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>惊喜度</span>
+              <input id="surpriseInput" type="range" min="0" max="1" step="0.05" />
+              <strong id="surpriseValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>张力曲线</span>
+              <select id="tensionCurveSelect">
+                <option value="arc">Arc</option>
+                <option value="rise">Rise</option>
+                <option value="fall">Fall</option>
+                <option value="wave">Wave</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>输出模式</span>
+              <select id="generationModeSelect">
+                <option value="new">新 Motif</option>
+                <option value="variation">局部变体</option>
+                <option value="continuation">续写后半句</option>
+                <option value="response">回答句</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button id="generateBtn" class="primary-button">生成旋律</button>
+            <button id="humanizeBtn">Organic 微调</button>
+            <button id="reversePatternBtn">反向</button>
+            <button id="stretchPatternBtn">拉伸 x2</button>
+          </div>
+
+          <div class="generator-notes">
+            <strong>当前策略</strong>
+            <p id="generationSummary"></p>
+          </div>
+
+          <div class="generator-notes">
+            <div class="panel-title-row mini">
+              <strong>积木视图</strong>
+              <span id="logicFormLabel" class="panel-tag">Manual</span>
+            </div>
+            <div id="generationBlocks" class="history-list"></div>
+          </div>
+
+          <div class="history-panel">
+            <div class="panel-title-row mini">
+              <h3>生成历史</h3>
+              <span id="historyCount" class="panel-tag">0</span>
+            </div>
+            <div id="historyList" class="history-list"></div>
+          </div>
+        </section>
+
+        <section class="panel candy-panel sequencer-panel" id="composeView">
+          <div class="panel-title-row">
+            <h2>Pattern Sequencer</h2>
+            <div class="button-row compact-actions">
+              <button id="duplicatePatternBtn">复制 Pattern</button>
+              <button id="clearPatternBtn">清空</button>
+              <button id="saveMotifBtn" class="primary-button">保存为 Motif</button>
+            </div>
+          </div>
+
+          <div class="sequencer-meta">
+            <div>
+              <strong id="patternTitle"></strong>
+              <p id="patternSubtitle"></p>
+            </div>
+            <p class="hint-text">
+              点击网格放置音符，Shift + 点击可删除，右侧面板编辑时值、力度与
+              cents 偏移。
+            </p>
+          </div>
+
+          <div class="sequencer-stage">
+            <div id="pitchLabels" class="pitch-labels"></div>
+            <div id="sequencerGrid" class="sequencer-grid"></div>
+          </div>
+
+          <div class="note-editor">
+            <div class="panel-title-row mini">
+              <h3>音符编辑</h3>
+              <span id="selectedNoteLabel" class="panel-tag">未选中</span>
+            </div>
+
+            <div class="grid-form compact-grid">
+              <label class="control">
+                <span>时值</span>
+                <input id="noteDurationInput" type="range" min="1" max="8" step="1" />
+                <strong id="noteDurationValue"></strong>
+              </label>
+              <label class="control">
+                <span>力度</span>
+                <input id="noteVelocityInput" type="range" min="30" max="127" step="1" />
+                <strong id="noteVelocityValue"></strong>
+              </label>
+              <label class="control">
+                <span>Pitch 偏移 (cents)</span>
+                <input id="noteOffsetInput" type="range" min="-100" max="100" step="5" />
+                <strong id="noteOffsetValue"></strong>
+              </label>
+              <label class="control">
+                <span>Articulation</span>
+                <select id="noteArticulationSelect">
+                  <option value="normal">Normal</option>
+                  <option value="staccato">Staccato</option>
+                  <option value="legato">Legato</option>
+                  <option value="accent">Accent</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="deleteNoteBtn">删除音符</button>
+              <button id="transposeUpBtn">+1 半音</button>
+              <button id="transposeDownBtn">-1 半音</button>
+            </div>
+          </div>
+
+          <div class="phrase-stage">
+            <div class="panel-title-row mini">
+              <h3>Phrase Builder</h3>
+              <div class="button-row compact-actions">
+                <label class="control compact">
+                  <span>Loop 次数</span>
+                  <select id="phraseLoopCountSelect">
+                    <option value="2">2x</option>
+                    <option value="4" selected>4x</option>
+                    <option value="8">8x</option>
+                    <option value="16">16x</option>
+                  </select>
+                </label>
+                <button id="playPhraseLoopBtn">循环播放 Phrase</button>
+                <button id="clearPhraseBtn">清空 Phrase</button>
+              </div>
+            </div>
+            <div id="phraseInspector" class="phrase-inspector"></div>
+            <div id="phraseTimeline" class="phrase-timeline"></div>
+          </div>
+        </section>
+
+        <section class="panel blossom-panel motif-panel">
+          <div class="panel-title-row">
+            <h2>Motif Library</h2>
+            <span id="motifCount" class="panel-tag"></span>
+          </div>
+
+          <div class="grid-form compact-grid">
+            <label class="control">
+              <span>搜索</span>
+              <input id="motifSearchInput" type="text" placeholder="tag / style / name" />
+            </label>
+            <label class="control">
+              <span>名称</span>
+              <input id="motifNameInput" type="text" placeholder="Moon Skip" />
+            </label>
+            <label class="control">
+              <span>标签</span>
+              <input id="motifTagsInput" type="text" placeholder="fusion, airy, pentatonic" />
+            </label>
+            <label class="control">
+              <span>难度</span>
+              <select id="motifDifficultySelect">
+                <option value="1">1 - Easy</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5 - Wild</option>
+              </select>
+            </label>
+            <label class="control">
+              <span>风格</span>
+              <input id="motifStyleInput" type="text" placeholder="lyrical / angular / funky" />
+            </label>
+          </div>
+
+          <div id="motifLibrary" class="motif-library"></div>
+        </section>
+
+        <section class="panel twilight-panel practice-panel hidden" id="practiceView">
+          <div class="panel-title-row">
+            <h2>Practice Mode</h2>
+            <span class="panel-tag">提升 solo 反应力</span>
+          </div>
+
+          <div class="grid-form">
+            <label class="control">
+              <span>训练模式</span>
+              <select id="practiceModeSelect">
+                <option value="progression">难度递进</option>
+                <option value="call-response">Call / Response</option>
+                <option value="transposition">转调循环</option>
+                <option value="restriction">限制条件训练</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>难度</span>
+              <input id="practiceDifficultyInput" type="range" min="1" max="5" step="1" />
+              <strong id="practiceDifficultyValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>循环次数</span>
+              <input id="practiceLoopsInput" type="range" min="1" max="8" step="1" />
+              <strong id="practiceLoopsValue"></strong>
+            </label>
+
+            <label class="control">
+              <span>速度提升</span>
+              <input id="practiceTempoLiftInput" type="range" min="0" max="40" step="5" />
+              <strong id="practiceTempoLiftValue"></strong>
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button id="buildPracticeBtn" class="primary-button">生成练习包</button>
+            <button id="playPracticeBtn">播放练习包</button>
+          </div>
+
+          <div id="practiceSummary" class="practice-summary"></div>
+          <div id="practiceList" class="practice-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="motifCardTemplate">
+      <article class="motif-card">
+        <div class="motif-card-head">
+          <div>
+            <h3 class="motif-name"></h3>
+            <p class="motif-meta"></p>
+          </div>
+          <span class="motif-badge"></span>
+        </div>
+        <p class="motif-preview"></p>
+        <div class="button-row compact-actions">
+          <button data-action="play">试听</button>
+          <button data-action="load">载入</button>
+          <button data-action="phrase">加入 Phrase</button>
+          <button data-action="transpose">+2</button>
+          <button data-action="answer">回应句</button>
+          <button data-action="duplicate">复制</button>
+          <button data-action="edit">编辑</button>
+          <button data-action="delete">删除</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="phraseBlockTemplate">
+      <article class="phrase-block">
+        <div>
+          <h4 class="phrase-block-name"></h4>
+          <p class="phrase-block-meta"></p>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="diatonic-down">顺阶 -1</button>
+          <button data-action="diatonic-up">顺阶 +1</button>
+          <button data-action="chromatic-down">半音 -1</button>
+          <button data-action="chromatic-up">半音 +1</button>
+          <button data-action="stretch">x2</button>
+          <button data-action="flip">Flip</button>
+          <button data-action="left">←</button>
+          <button data-action="right">→</button>
+          <button data-action="duplicate">复制</button>
+          <button data-action="remove">移除</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="practiceItemTemplate">
+      <article class="practice-item">
+        <div>
+          <h3 class="practice-item-name"></h3>
+          <p class="practice-item-meta"></p>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="play">播放</button>
+          <button data-action="load">载入到编辑器</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="historyItemTemplate">
+      <article class="history-item">
+        <div>
+          <h3 class="history-item-name"></h3>
+          <p class="history-item-meta"></p>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="play">试听</button>
+          <button data-action="load">载入</button>
+          <button data-action="motif">存成 Motif</button>
+          <button data-action="phrase">加入 Phrase</button>
+        </div>
+      </article>
+    </template>
+
+    <template id="instrumentItemTemplate">
+      <article class="history-item">
+        <div>
+          <h3 class="history-item-name"></h3>
+          <p class="history-item-meta"></p>
+        </div>
+        <div class="button-row compact-actions">
+          <button data-action="use">使用</button>
+          <button data-action="edit">编辑</button>
+          <button data-action="delete">删除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./core.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
