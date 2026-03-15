@@ -140,9 +140,16 @@
     generatorPresetSelect: document.getElementById("generatorPresetSelect"),
     saveGeneratorPresetBtn: document.getElementById("saveGeneratorPresetBtn"),
     applyGeneratorPresetBtn: document.getElementById("applyGeneratorPresetBtn"),
+    duplicateGeneratorPresetBtn: document.getElementById("duplicateGeneratorPresetBtn"),
+    editGeneratorPresetBtn: document.getElementById("editGeneratorPresetBtn"),
+    pinGeneratorPresetBtn: document.getElementById("pinGeneratorPresetBtn"),
     overwriteGeneratorPresetBtn: document.getElementById("overwriteGeneratorPresetBtn"),
     deleteGeneratorPresetBtn: document.getElementById("deleteGeneratorPresetBtn"),
+    exportGeneratorPresetsBtn: document.getElementById("exportGeneratorPresetsBtn"),
+    importGeneratorPresetsBtn: document.getElementById("importGeneratorPresetsBtn"),
+    importGeneratorPresetsInput: document.getElementById("importGeneratorPresetsInput"),
     generatorPresetSummary: document.getElementById("generatorPresetSummary"),
+    generatorPresetNotes: document.getElementById("generatorPresetNotes"),
     generatorPresetDiff: document.getElementById("generatorPresetDiff"),
     generateBtn: document.getElementById("generateBtn"),
     humanizeBtn: document.getElementById("humanizeBtn"),
@@ -274,6 +281,8 @@
         {
           id: core.createId("preset"),
           name: "Organic Dorian Builder",
+          pinned: true,
+          notes: "Balanced default for organic single-line exploration.",
           instrumentId: instrument.id,
           scale: core.deepClone(scale),
           generator: {
@@ -408,6 +417,8 @@
     return {
       id: preset.id || core.createId("preset"),
       name: preset.name || "Generator Preset",
+      pinned: Boolean(preset.pinned),
+      notes: typeof preset.notes === "string" ? preset.notes : "",
       instrumentId: preset.instrumentId || null,
       scale: core.deepClone(preset.scale),
       generator: Object.assign(
@@ -431,7 +442,18 @@
     if (!Array.isArray(presets)) {
       return [];
     }
-    return presets.map(normalizeGeneratorPreset).filter(Boolean);
+    return sortGeneratorPresets(presets.map(normalizeGeneratorPreset).filter(Boolean));
+  }
+
+  function sortGeneratorPresets(presets) {
+    return presets
+      .slice()
+      .sort(function (left, right) {
+        if (Boolean(left.pinned) !== Boolean(right.pinned)) {
+          return left.pinned ? -1 : 1;
+        }
+        return String(left.name).localeCompare(String(right.name));
+      });
   }
 
   function normalizeGeneratorPresetId(presetId, presets) {
@@ -445,6 +467,15 @@
       : presets[0]
         ? presets[0].id
         : null;
+  }
+
+  function cloneImportedGeneratorPreset(preset) {
+    const cloned = normalizeGeneratorPreset(preset);
+    if (!cloned) {
+      return null;
+    }
+    cloned.id = core.createId("preset");
+    return cloned;
   }
 
   function normalizePhraseSelection(selection, blockCount) {
@@ -1329,24 +1360,43 @@
     elements.generatorPresetSelect.innerHTML = state.generatorPresets.length
       ? state.generatorPresets
           .map(function (preset) {
-            return '<option value="' + preset.id + '">' + preset.name + "</option>";
+            return '<option value="' + preset.id + '">' + (preset.pinned ? "★ " : "") + preset.name + "</option>";
           })
           .join("")
       : '<option value="">No presets yet</option>';
     elements.generatorPresetSelect.value = state.selectedGeneratorPresetId || (state.generatorPresets[0] ? state.generatorPresets[0].id : "");
     elements.applyGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.duplicateGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.editGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.pinGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
     elements.overwriteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
     elements.deleteGeneratorPresetBtn.disabled = state.generatorPresets.length === 0;
+    elements.exportGeneratorPresetsBtn.disabled = state.generatorPresets.length === 0;
+    const preset = getSelectedGeneratorPreset();
+    elements.pinGeneratorPresetBtn.textContent = preset && preset.pinned ? "Unpin" : "Pin";
   }
 
   function createGeneratorPresetFromState(name) {
     return {
       id: core.createId("preset"),
       name: name || "Generator Preset",
+      pinned: false,
+      notes: "",
       instrumentId: state.instrumentId,
       scale: core.deepClone(state.scale),
       generator: core.deepClone(state.generator),
     };
+  }
+
+  function duplicateGeneratorPreset(preset) {
+    if (!preset) {
+      return null;
+    }
+    const copy = normalizeGeneratorPreset(core.deepClone(preset));
+    copy.id = core.createId("preset");
+    copy.name = preset.name + " Copy";
+    copy.pinned = false;
+    return copy;
   }
 
   function getSelectedGeneratorPreset() {
@@ -1418,8 +1468,80 @@
         return preset;
       }
       nextPreset.id = preset.id;
+      nextPreset.pinned = preset.pinned;
+      nextPreset.notes = preset.notes;
       return nextPreset;
     });
+    state.generatorPresets = sortGeneratorPresets(state.generatorPresets);
+  }
+
+  function toggleGeneratorPresetPin(presetId) {
+    state.generatorPresets = sortGeneratorPresets(
+      state.generatorPresets.map(function (preset) {
+        if (preset.id !== presetId) {
+          return preset;
+        }
+        return Object.assign({}, preset, {
+          pinned: !preset.pinned,
+        });
+      })
+    );
+  }
+
+  function updateGeneratorPreset(presetId, updater) {
+    state.generatorPresets = sortGeneratorPresets(
+      state.generatorPresets.map(function (preset) {
+        if (preset.id !== presetId) {
+          return preset;
+        }
+        return normalizeGeneratorPreset(updater(core.deepClone(preset)));
+      })
+    );
+  }
+
+  function exportGeneratorPresets() {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      presets: state.generatorPresets.map(function (preset) {
+        return core.deepClone(preset);
+      }),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "project-mozart-generator-presets-" + Date.now() + ".json";
+    link.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(link.href);
+    }, 1000);
+  }
+
+  function importGeneratorPresets(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function () {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const imported = Array.isArray(parsed && parsed.presets) ? parsed.presets.map(cloneImportedGeneratorPreset).filter(Boolean) : [];
+        if (!imported.length) {
+          throw new Error("No presets");
+        }
+        recordCheckpoint("Import generator presets");
+        state.generatorPresets = sortGeneratorPresets(imported.concat(state.generatorPresets));
+        state.selectedGeneratorPresetId = imported[0].id;
+        hydrateControls();
+        render();
+      } catch (error) {
+        window.alert("Preset import failed: invalid preset bundle.");
+      } finally {
+        elements.importGeneratorPresetsInput.value = "";
+      }
+    };
+    reader.readAsText(file);
   }
 
   function fitPatternForCurrentInstrument(pattern) {
@@ -1601,7 +1723,7 @@
       }
       recordCheckpoint("Save generator preset");
       const preset = createGeneratorPresetFromState(name.trim() || suggestedName);
-      state.generatorPresets.unshift(preset);
+      state.generatorPresets = sortGeneratorPresets([preset].concat(state.generatorPresets));
       state.selectedGeneratorPresetId = preset.id;
       hydrateControls();
       render();
@@ -1613,6 +1735,56 @@
       }
       recordCheckpoint("Apply generator preset");
       applyGeneratorPreset(preset);
+      hydrateControls();
+      render();
+    });
+    elements.duplicateGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      recordCheckpoint("Duplicate generator preset");
+      const copy = duplicateGeneratorPreset(preset);
+      if (!copy) {
+        return;
+      }
+      state.generatorPresets = sortGeneratorPresets([copy].concat(state.generatorPresets));
+      state.selectedGeneratorPresetId = copy.id;
+      hydrateControls();
+      render();
+    });
+    elements.editGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      const nextName = window.prompt("Preset name", preset.name);
+      if (nextName == null) {
+        return;
+      }
+      const nextNotes = window.prompt(
+        "Preset notes",
+        preset.notes || ""
+      );
+      if (nextNotes == null) {
+        return;
+      }
+      recordCheckpoint("Edit generator preset");
+      updateGeneratorPreset(preset.id, function (candidate) {
+        candidate.name = nextName.trim() || candidate.name;
+        candidate.notes = nextNotes.trim();
+        return candidate;
+      });
+      hydrateControls();
+      render();
+    });
+    elements.pinGeneratorPresetBtn.addEventListener("click", function () {
+      const preset = getSelectedGeneratorPreset();
+      if (!preset) {
+        return;
+      }
+      recordCheckpoint((preset.pinned ? "Unpin " : "Pin ") + "generator preset");
+      toggleGeneratorPresetPin(preset.id);
       hydrateControls();
       render();
     });
@@ -1635,10 +1807,21 @@
       state.generatorPresets = state.generatorPresets.filter(function (entry) {
         return entry.id !== preset.id;
       });
+      state.generatorPresets = sortGeneratorPresets(state.generatorPresets);
       state.selectedGeneratorPresetId = normalizeGeneratorPresetId(null, state.generatorPresets);
       hydrateControls();
       render();
     });
+    elements.exportGeneratorPresetsBtn.addEventListener("click", function () {
+      if (!state.generatorPresets.length) {
+        return;
+      }
+      exportGeneratorPresets();
+    });
+    elements.importGeneratorPresetsBtn.addEventListener("click", function () {
+      elements.importGeneratorPresetsInput.click();
+    });
+    elements.importGeneratorPresetsInput.addEventListener("change", importGeneratorPresets);
     elements.motifSearchInput.addEventListener("input", function () {
       state.motifSearch = elements.motifSearchInput.value;
       render();
@@ -1955,6 +2138,7 @@
     const selectedPreset = getSelectedGeneratorPreset();
     elements.generatorPresetSummary.textContent = selectedPreset
       ? "Preset: " +
+        (selectedPreset.pinned ? "★ " : "") +
         selectedPreset.name +
         " | " +
         core.NOTE_NAMES[selectedPreset.scale.rootPc] +
@@ -1963,6 +2147,11 @@
         " | " +
         (GENERATION_MODE_LABELS[selectedPreset.generator.mode] || selectedPreset.generator.mode)
       : "Preset: none yet. Save the current generator setup to reuse it later.";
+    elements.generatorPresetNotes.textContent = selectedPreset
+      ? (selectedPreset.notes
+        ? "Notes: " + selectedPreset.notes
+        : "Notes: none yet. Use Edit to describe when this preset works best.")
+      : "";
     const presetDiff = getGeneratorPresetDiff(selectedPreset);
     elements.generatorPresetDiff.textContent = selectedPreset
       ? (presetDiff.length
