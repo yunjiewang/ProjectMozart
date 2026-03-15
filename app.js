@@ -1,5 +1,6 @@
 (function () {
   const core = window.MozartCore;
+  const io = window.MozartIO;
   const STORAGE_KEY = "project-mozart-state-v1";
   const MAX_UNDO_STACK = 40;
   const MAX_MORPH_TRAIL = 6;
@@ -17,6 +18,7 @@
     generatorModeHintUntil: 0,
     dismissGeneratorModeHint: false,
     muteGeneratorModeHintsSession: false,
+    editingMotifId: null,
   };
   const GENERATION_MODE_LABELS = {
     new: "新 Motif",
@@ -115,11 +117,35 @@
     "motif-derived": "Derived from Motif",
     legacy: "Legacy Motif",
   };
+  const ONBOARDING_HINTS = [
+    {
+      id: "generator-mode",
+      title: "Generator 模式提示",
+      text: "先在 new / variation / continuation 三个模式切换体验，再决定是否进入 tail/cadence 收束。",
+    },
+    {
+      id: "motif-provenance",
+      title: "Motif 来源筛选",
+      text: "Motif Library 可按 provenance 过滤，快速区分手动保存、生成器产物与 morph 结果。",
+    },
+    {
+      id: "morph-trail",
+      title: "Morph Trail 工作流",
+      text: "在 A/B 快照之间做混合后，可直接存入 Trail，再一键转为 Motif 进入编排。",
+    },
+    {
+      id: "preset-workflow",
+      title: "Preset 复用",
+      text: "把常用生成参数保存为 Preset，并用标签管理，能显著加快不同段落的试错速度。",
+    },
+  ];
 
   let state = normalizeState(loadState() || createInitialState());
 
   const elements = {
     viewMode: document.getElementById("viewMode"),
+    compactLayoutInput: document.getElementById("compactLayoutInput"),
+    resetOnboardingTipsBtn: document.getElementById("resetOnboardingTipsBtn"),
     composeView: document.getElementById("composeView"),
     practiceView: document.getElementById("practiceView"),
     instrumentSelect: document.getElementById("instrumentSelect"),
@@ -177,6 +203,7 @@
     stretchPatternBtn: document.getElementById("stretchPatternBtn"),
     generationSummary: document.getElementById("generationSummary"),
     generationModeHint: document.getElementById("generationModeHint"),
+    onboardingTips: document.getElementById("onboardingTips"),
     alwaysShowModeHintsInput: document.getElementById("alwaysShowModeHintsInput"),
     dismissModeHintBtn: document.getElementById("dismissModeHintBtn"),
     muteModeHintsSessionInput: document.getElementById("muteModeHintsSessionInput"),
@@ -217,10 +244,23 @@
     motifProvenanceFilter: document.getElementById("motifProvenanceFilter"),
     motifStyleFilter: document.getElementById("motifStyleFilter"),
     motifDifficultyFilter: document.getElementById("motifDifficultyFilter"),
+    motifFavoriteFilter: document.getElementById("motifFavoriteFilter"),
     motifFilterSummary: document.getElementById("motifFilterSummary"),
+    motifSelectionSummary: document.getElementById("motifSelectionSummary"),
+    selectVisibleMotifsBtn: document.getElementById("selectVisibleMotifsBtn"),
+    clearMotifSelectionBtn: document.getElementById("clearMotifSelectionBtn"),
+    batchAddMotifsToPhraseBtn: document.getElementById("batchAddMotifsToPhraseBtn"),
+    batchFavoriteMotifsBtn: document.getElementById("batchFavoriteMotifsBtn"),
+    batchDeleteMotifsBtn: document.getElementById("batchDeleteMotifsBtn"),
     clearMotifFiltersBtn: document.getElementById("clearMotifFiltersBtn"),
     motifLibrary: document.getElementById("motifLibrary"),
     motifCount: document.getElementById("motifCount"),
+    motifEditDialog: document.getElementById("motifEditDialog"),
+    motifEditForm: document.getElementById("motifEditForm"),
+    motifEditNameInput: document.getElementById("motifEditNameInput"),
+    motifEditStyleInput: document.getElementById("motifEditStyleInput"),
+    motifEditTagsInput: document.getElementById("motifEditTagsInput"),
+    motifEditCancelBtn: document.getElementById("motifEditCancelBtn"),
     practiceModeSelect: document.getElementById("practiceModeSelect"),
     practiceDifficultyInput: document.getElementById("practiceDifficultyInput"),
     practiceDifficultyValue: document.getElementById("practiceDifficultyValue"),
@@ -332,13 +372,17 @@
       generatorPresetTagFilter: "all",
       generatorBridgeHint: "",
       alwaysShowModeHints: false,
+      compactLayout: false,
+      onboardingTipsDismissed: {},
       history: [],
       motifSearch: "",
       motifFilters: {
         provenance: "all",
         style: "all",
         difficulty: "all",
+        favorite: "all",
       },
+      selectedMotifIds: [],
       undoStack: [],
       redoStack: [],
       practice: {
@@ -382,12 +426,20 @@
     next.generatorPresetTagFilter = typeof (inputState && inputState.generatorPresetTagFilter) === "string" ? inputState.generatorPresetTagFilter : "all";
     next.generatorBridgeHint = typeof (inputState && inputState.generatorBridgeHint) === "string" ? inputState.generatorBridgeHint : "";
     next.alwaysShowModeHints = Boolean(inputState && inputState.alwaysShowModeHints);
+    next.compactLayout = Boolean(inputState && inputState.compactLayout);
+    next.onboardingTipsDismissed = inputState && inputState.onboardingTipsDismissed && typeof inputState.onboardingTipsDismissed === "object"
+      ? inputState.onboardingTipsDismissed
+      : {};
     next.undoStack = [];
     next.redoStack = [];
     next.phraseLoopCount = Number(inputState && inputState.phraseLoopCount) || base.phraseLoopCount;
     next.motifLibrary = Array.isArray(inputState && inputState.motifLibrary)
       ? inputState.motifLibrary.map(normalizeMotifEntry)
       : base.motifLibrary;
+    const motifIdSet = new Set(next.motifLibrary.map(function (motif) { return motif.id; }));
+    next.selectedMotifIds = Array.isArray(inputState && inputState.selectedMotifIds)
+      ? inputState.selectedMotifIds.filter(function (id) { return motifIdSet.has(id); })
+      : [];
     next.phrase = inputState && inputState.phrase && Array.isArray(inputState.phrase.blocks) ? inputState.phrase : base.phrase;
     next.phrase.blocks = next.phrase.blocks.map(normalizePhraseBlock);
     next.phraseSelection = normalizePhraseSelection(
@@ -443,16 +495,30 @@
   function normalizeMotifEntry(motif) {
     return Object.assign({}, motif, {
       provenance: MOTIF_PROVENANCE_LABELS[motif && motif.provenance] ? motif.provenance : "legacy",
+      starred: Boolean(motif && motif.starred),
     });
   }
 
   function normalizeMotifFilters(filters) {
-    const next = Object.assign({ provenance: "all", style: "all", difficulty: "all" }, filters || {});
+    const next = Object.assign({ provenance: "all", style: "all", difficulty: "all", favorite: "all" }, filters || {});
     return {
       provenance: MOTIF_PROVENANCE_LABELS[next.provenance] ? next.provenance : "all",
       style: typeof next.style === "string" && next.style ? next.style : "all",
       difficulty: ["all", "1", "2", "3", "4", "5"].includes(String(next.difficulty)) ? String(next.difficulty) : "all",
+      favorite: ["all", "starred"].includes(String(next.favorite)) ? String(next.favorite) : "all",
     };
+  }
+
+  function pruneMotifSelection() {
+    const motifIds = new Set(state.motifLibrary.map(function (motif) { return motif.id; }));
+    state.selectedMotifIds = (state.selectedMotifIds || []).filter(function (id) {
+      return motifIds.has(id);
+    });
+  }
+
+  function normalizeSelectedMotifIds(ids) {
+    const motifIds = new Set(state.motifLibrary.map(function (motif) { return motif.id; }));
+    return Array.from(new Set((ids || []).filter(function (id) { return motifIds.has(id); })));
   }
 
   function normalizePresetTags(tags) {
@@ -1493,6 +1559,7 @@
     elements.motifProvenanceFilter.value = state.motifFilters.provenance;
     elements.motifStyleFilter.value = styles.includes(state.motifFilters.style) ? state.motifFilters.style : "all";
     elements.motifDifficultyFilter.value = state.motifFilters.difficulty;
+    elements.motifFavoriteFilter.value = state.motifFilters.favorite;
   }
 
   function renderGeneratorPresetQuickTags(tagOptions) {
@@ -1681,14 +1748,8 @@
   }
 
   function exportGeneratorPresets() {
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      presets: state.generatorPresets.map(function (preset) {
-        return core.deepClone(preset);
-      }),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const payload = io.buildGeneratorPresetBundle(state.generatorPresets);
+    const blob = new Blob([io.toPrettyJson(payload)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = "project-mozart-generator-presets-" + Date.now() + ".json";
@@ -1706,8 +1767,8 @@
     const reader = new FileReader();
     reader.onload = function () {
       try {
-        const parsed = JSON.parse(String(reader.result));
-        const imported = Array.isArray(parsed && parsed.presets) ? parsed.presets.map(cloneImportedGeneratorPreset).filter(Boolean) : [];
+        const parsed = io.parseJsonText(reader.result);
+        const imported = io.extractGeneratorPresets(parsed, cloneImportedGeneratorPreset);
         if (!imported.length) {
           throw new Error("No presets");
         }
@@ -1783,6 +1844,7 @@
     elements.gridSelect.value = String(state.pattern.grid);
     elements.bpmInput.value = String(state.bpm);
     elements.viewMode.value = state.viewMode;
+    elements.compactLayoutInput.checked = Boolean(state.compactLayout);
     elements.phraseLoopCountSelect.value = String(state.phraseLoopCount || 4);
 
     elements.densityInput.value = String(state.generator.density);
@@ -1827,6 +1889,31 @@
     return (tagline ? tagline + " · " : "") + cadenceVisibility;
   }
 
+  function renderOnboardingTips() {
+    const activeHints = ONBOARDING_HINTS.filter(function (hint) {
+      return !state.onboardingTipsDismissed[hint.id];
+    });
+    if (!activeHints.length) {
+      elements.onboardingTips.innerHTML = '<p class="hint-text">新手提示已全部隐藏，可点顶部「重置新手提示」再次显示。</p>';
+      return;
+    }
+    elements.onboardingTips.innerHTML = activeHints
+      .map(function (hint) {
+        return '<article class="onboarding-tip-card">' +
+          '<div><strong>' + hint.title + '</strong><p>' + hint.text + '</p></div>' +
+          '<button type="button" data-tip-dismiss="' + hint.id + '">知道了</button>' +
+        '</article>';
+      })
+      .join("");
+    elements.onboardingTips.querySelectorAll("[data-tip-dismiss]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const tipId = button.getAttribute("data-tip-dismiss");
+        state.onboardingTipsDismissed[tipId] = true;
+        render();
+      });
+    });
+  }
+
   function bindEvents() {
     registerInteractiveCheckpoint(elements.bpmInput, "tempo", "Adjust tempo");
     registerInteractiveCheckpoint(elements.noteDurationInput, "note-duration", "Edit note duration");
@@ -1857,6 +1944,17 @@
 
     elements.viewMode.addEventListener("change", function () {
       state.viewMode = elements.viewMode.value;
+      render();
+    });
+
+    elements.compactLayoutInput.addEventListener("change", function () {
+      state.compactLayout = elements.compactLayoutInput.checked;
+      render();
+    });
+
+    elements.resetOnboardingTipsBtn.addEventListener("click", function () {
+      recordCheckpoint("Reset onboarding tips");
+      state.onboardingTipsDismissed = {};
       render();
     });
 
@@ -2081,9 +2179,72 @@
       state.motifFilters.difficulty = elements.motifDifficultyFilter.value;
       render();
     });
+    elements.motifFavoriteFilter.addEventListener("change", function () {
+      state.motifFilters.favorite = elements.motifFavoriteFilter.value;
+      render();
+    });
     elements.clearMotifFiltersBtn.addEventListener("click", function () {
       state.motifSearch = "";
       state.motifFilters = normalizeMotifFilters();
+      render();
+    });
+    elements.selectVisibleMotifsBtn.addEventListener("click", function () {
+      const visibleIds = getVisibleMotifsForLibrary().map(function (motif) { return motif.id; });
+      state.selectedMotifIds = normalizeSelectedMotifIds(state.selectedMotifIds.concat(visibleIds));
+      render();
+    });
+    elements.clearMotifSelectionBtn.addEventListener("click", function () {
+      state.selectedMotifIds = [];
+      render();
+    });
+    elements.batchAddMotifsToPhraseBtn.addEventListener("click", function () {
+      const selected = getSelectedMotifs();
+      if (!selected.length) {
+        return;
+      }
+      recordCheckpoint("Batch add motifs to phrase");
+      selected.forEach(function (motif) {
+        core.addMotifToPhrase(state.phrase, motif);
+      });
+      render();
+    });
+    elements.batchFavoriteMotifsBtn.addEventListener("click", function () {
+      const selected = getSelectedMotifs();
+      if (!selected.length) {
+        return;
+      }
+      recordCheckpoint("Batch favorite motifs");
+      selected.forEach(function (motif) {
+        motif.starred = true;
+      });
+      render();
+    });
+    elements.batchDeleteMotifsBtn.addEventListener("click", function () {
+      const selected = getSelectedMotifs();
+      if (!selected.length) {
+        return;
+      }
+      if (!window.confirm("Delete selected motifs from library?")) {
+        return;
+      }
+      recordCheckpoint("Batch delete motifs");
+      const selectedIds = new Set(selected.map(function (motif) { return motif.id; }));
+      const selectedNames = new Map(selected.map(function (motif) { return [motif.id, motif.name]; }));
+      state.motifLibrary = state.motifLibrary.filter(function (entry) {
+        return !selectedIds.has(entry.id);
+      });
+      state.phrase.blocks = state.phrase.blocks.filter(function (block) {
+        return !selectedIds.has(block.motifId) || block.relationMode === "frozen";
+      }).map(function (block) {
+        if (selectedIds.has(block.motifId) && block.relationMode === "frozen") {
+          return Object.assign({}, block, {
+            motifName: block.motifName || selectedNames.get(block.motifId) || "Deleted Motif",
+            motifId: null,
+          });
+        }
+        return block;
+      });
+      state.selectedMotifIds = [];
       render();
     });
 
@@ -2158,6 +2319,12 @@
     });
 
     elements.saveMotifBtn.addEventListener("click", saveCurrentPatternAsMotif);
+
+    elements.motifEditCancelBtn.addEventListener("click", closeMotifEditDialog);
+    elements.motifEditForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      commitMotifEditDialog();
+    });
 
     elements.noteDurationInput.addEventListener("input", function () {
       updateSelectedNote(function (note) {
@@ -2338,6 +2505,7 @@
   function render() {
     elements.composeView.classList.toggle("hidden", state.viewMode !== "compose");
     elements.practiceView.classList.toggle("hidden", state.viewMode !== "practice");
+    document.body.classList.toggle("compact-layout", Boolean(state.compactLayout));
     updateGeneratorModeConditionalControls();
 
     elements.bpmValue.textContent = state.bpm + " BPM";
@@ -2380,6 +2548,7 @@
     elements.dismissModeHintBtn.classList.toggle("hidden", !showModeHint);
     elements.dismissModeHintBtn.disabled = !showModeHint;
     elements.muteModeHintsSessionInput.checked = Boolean(interactionState.muteGeneratorModeHintsSession);
+    renderOnboardingTips();
 
     elements.generationSummary.textContent =
       "密度 " +
@@ -2809,21 +2978,15 @@
     return next;
   }
 
-  function renderMotifLibrary() {
+  function getVisibleMotifsForLibrary() {
     const query = (state.motifSearch || "").trim().toLowerCase();
     const filters = normalizeMotifFilters(state.motifFilters);
-    state.motifFilters = filters;
-    elements.motifSearchInput.value = state.motifSearch || "";
-    hydrateMotifFilterControls();
-    const visibleMotifs = state.motifLibrary.filter(function (motif) {
+    return state.motifLibrary.filter(function (motif) {
       if (!query) {
         return true;
       }
       const haystack = [motif.name, motif.style, motif.provenance, motif.recommendedUse].concat(motif.tags).join(" ").toLowerCase();
-      if (!haystack.includes(query)) {
-        return false;
-      }
-      return true;
+      return haystack.includes(query);
     }).filter(function (motif) {
       if (filters.provenance !== "all" && motif.provenance !== filters.provenance) {
         return false;
@@ -2834,8 +2997,39 @@
       if (filters.difficulty !== "all" && String(motif.difficulty) !== filters.difficulty) {
         return false;
       }
+      if (filters.favorite === "starred" && !motif.starred) {
+        return false;
+      }
       return true;
     });
+  }
+
+  function getSelectedMotifs() {
+    const selectedIds = new Set(state.selectedMotifIds || []);
+    return state.motifLibrary.filter(function (motif) {
+      return selectedIds.has(motif.id);
+    });
+  }
+
+  function renderMotifBatchBar(visibleMotifs) {
+    pruneMotifSelection();
+    const selectedCount = (state.selectedMotifIds || []).length;
+    elements.motifSelectionSummary.textContent = "已选 " + selectedCount + " 项";
+    const hasSelection = selectedCount > 0;
+    elements.clearMotifSelectionBtn.disabled = !hasSelection;
+    elements.batchAddMotifsToPhraseBtn.disabled = !hasSelection;
+    elements.batchFavoriteMotifsBtn.disabled = !hasSelection;
+    elements.batchDeleteMotifsBtn.disabled = !hasSelection;
+    elements.selectVisibleMotifsBtn.disabled = !visibleMotifs.length;
+  }
+
+  function renderMotifLibrary() {
+    const query = (state.motifSearch || "").trim().toLowerCase();
+    const filters = normalizeMotifFilters(state.motifFilters);
+    state.motifFilters = filters;
+    elements.motifSearchInput.value = state.motifSearch || "";
+    hydrateMotifFilterControls();
+    const visibleMotifs = getVisibleMotifsForLibrary();
     elements.motifCount.textContent = visibleMotifs.length + " motifs";
     const filterSummaryParts = [];
     if (query) {
@@ -2850,14 +3044,18 @@
     if (filters.difficulty !== "all") {
       filterSummaryParts.push("Diff " + filters.difficulty);
     }
+    if (filters.favorite === "starred") {
+      filterSummaryParts.push("Starred only");
+    }
     elements.motifFilterSummary.textContent = filterSummaryParts.length
       ? "Filters: " + filterSummaryParts.join(" | ")
       : "Filters: All motifs";
+    renderMotifBatchBar(visibleMotifs);
     elements.motifLibrary.innerHTML = "";
     const template = document.getElementById("motifCardTemplate");
     visibleMotifs.forEach(function (motif) {
       const card = template.content.firstElementChild.cloneNode(true);
-      card.querySelector(".motif-name").textContent = motif.name;
+      card.querySelector(".motif-name").textContent = (motif.starred ? "★ " : "") + motif.name;
       card.querySelector(".motif-meta").textContent =
         motif.style + " · diff " + motif.difficulty + " · " + (motif.tags.join(", ") || "untagged");
       card.querySelector(".motif-provenance").textContent =
@@ -2867,6 +3065,17 @@
         (motif.recommendedUse || "idea starter");
       card.querySelector(".motif-badge").textContent = core.NOTE_NAMES[motif.sourcePattern.notes[0] ? motif.sourcePattern.notes[0].pitch.pc : state.scale.rootPc];
       card.querySelector(".motif-preview").textContent = core.previewPattern(motif.sourcePattern);
+      card.querySelector('[data-action="favorite"]').textContent = motif.starred ? "取消收藏" : "收藏";
+      const selectInput = card.querySelector('[data-role="select-motif"]');
+      selectInput.checked = (state.selectedMotifIds || []).includes(motif.id);
+      selectInput.addEventListener("change", function () {
+        if (selectInput.checked) {
+          state.selectedMotifIds = normalizeSelectedMotifIds((state.selectedMotifIds || []).concat([motif.id]));
+        } else {
+          state.selectedMotifIds = (state.selectedMotifIds || []).filter(function (id) { return id !== motif.id; });
+        }
+        render();
+      });
       card.querySelectorAll("button").forEach(function (button) {
         button.addEventListener("click", function () {
           const action = button.getAttribute("data-action");
@@ -2934,27 +3143,12 @@
                 provenance: "motif-derived",
               })
             );
+          } else if (action === "favorite") {
+            recordCheckpoint((motif.starred ? "Unstar " : "Star ") + "motif");
+            motif.starred = !motif.starred;
           } else if (action === "edit") {
-            const nextName = window.prompt("Motif name", motif.name);
-            if (!nextName) {
-              return;
-            }
-            recordCheckpoint("Edit motif");
-            motif.name = nextName.trim() || motif.name;
-            state.phrase.blocks.forEach(function (block) {
-              if (block.motifId === motif.id && block.relationMode !== "frozen") {
-                block.motifName = motif.name;
-              }
-            });
-            const nextStyle = window.prompt("Motif style", motif.style);
-            motif.style = (nextStyle || motif.style).trim() || motif.style;
-            const nextTags = window.prompt("Motif tags (comma separated)", motif.tags.join(", "));
-            motif.tags = (nextTags || "")
-              .split(",")
-              .map(function (item) {
-                return item.trim();
-              })
-              .filter(Boolean);
+            openMotifEditDialog(motif);
+            return;
           } else if (action === "delete") {
             if (!window.confirm("Delete this motif from the library?")) {
               return;
@@ -2963,6 +3157,7 @@
             state.motifLibrary = state.motifLibrary.filter(function (entry) {
               return entry.id !== motif.id;
             });
+            state.selectedMotifIds = (state.selectedMotifIds || []).filter(function (id) { return id !== motif.id; });
             state.phrase.blocks = state.phrase.blocks.filter(function (block) {
               return block.motifId !== motif.id || block.relationMode === "frozen";
             }).map(function (block) {
@@ -3461,6 +3656,52 @@
     render();
   }
 
+  function openMotifEditDialog(motif) {
+    if (!motif) {
+      return;
+    }
+    interactionState.editingMotifId = motif.id;
+    elements.motifEditNameInput.value = motif.name;
+    elements.motifEditStyleInput.value = motif.style;
+    elements.motifEditTagsInput.value = (motif.tags || []).join(", ");
+    if (elements.motifEditDialog && typeof elements.motifEditDialog.showModal === "function") {
+      elements.motifEditDialog.showModal();
+    }
+  }
+
+  function closeMotifEditDialog() {
+    interactionState.editingMotifId = null;
+    if (elements.motifEditDialog && elements.motifEditDialog.open) {
+      elements.motifEditDialog.close();
+    }
+  }
+
+  function commitMotifEditDialog() {
+    const motif = state.motifLibrary.find(function (entry) {
+      return entry.id === interactionState.editingMotifId;
+    });
+    if (!motif) {
+      closeMotifEditDialog();
+      return;
+    }
+    recordCheckpoint("Edit motif");
+    motif.name = elements.motifEditNameInput.value.trim() || motif.name;
+    motif.style = elements.motifEditStyleInput.value.trim() || motif.style;
+    motif.tags = elements.motifEditTagsInput.value
+      .split(",")
+      .map(function (item) {
+        return item.trim();
+      })
+      .filter(Boolean);
+    state.phrase.blocks.forEach(function (block) {
+      if (block.motifId === motif.id && block.relationMode !== "frozen") {
+        block.motifName = motif.name;
+      }
+    });
+    closeMotifEditDialog();
+    render();
+  }
+
   function saveCurrentPatternAsMotif() {
     recordCheckpoint("Save motif");
     const name = elements.motifNameInput.value.trim() || state.pattern.name || "Untitled Motif";
@@ -3477,6 +3718,7 @@
       style: elements.motifStyleInput.value.trim() || "organic",
       recommendedUse: "phrase block",
       provenance: "pattern",
+      starred: false,
     });
     state.motifLibrary.unshift(motif);
     elements.motifNameInput.value = "";
@@ -3502,7 +3744,7 @@
   }
 
   function exportProjectState() {
-    const blob = new Blob([JSON.stringify(createSerializableSnapshot(state), null, 2)], { type: "application/json" });
+    const blob = new Blob([io.toPrettyJson(createSerializableSnapshot(state))], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = "project-mozart-state-" + Date.now() + ".json";
@@ -3520,7 +3762,7 @@
     const reader = new FileReader();
     reader.onload = function () {
       try {
-        const parsed = JSON.parse(String(reader.result));
+        const parsed = io.parseJsonText(reader.result);
         const undoStack = state.undoStack.concat([createSerializableSnapshot(state)]).slice(-MAX_UNDO_STACK);
         restoreState(parsed, {
           undoStack: undoStack,

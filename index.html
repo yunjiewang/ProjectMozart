@@ -19,13 +19,20 @@
         </div>
 
         <div class="hero-actions">
-          <label class="control compact">
-            <span>视图</span>
-            <select id="viewMode">
-              <option value="compose">创作视图</option>
-              <option value="practice">练习视图</option>
-            </select>
-          </label>
+          <div class="hero-inline-controls">
+            <label class="control compact">
+              <span>视图</span>
+              <select id="viewMode">
+                <option value="compose">创作视图</option>
+                <option value="practice">练习视图</option>
+              </select>
+            </label>
+            <label class="control compact inline-check">
+              <span>紧凑布局</span>
+              <input id="compactLayoutInput" type="checkbox" />
+            </label>
+            <button id="resetOnboardingTipsBtn" type="button" class="ghost-button">重置新手提示</button>
+          </div>
 
           <div class="button-row">
             <button id="playPatternBtn" class="primary-button">播放 Pattern</button>
@@ -264,6 +271,7 @@
               <button id="dismissModeHintBtn" type="button" class="ghost-button">暂时隐藏提示</button>
             </div>
             <p id="generationModeHint" class="generator-preset-summary"></p>
+            <div id="onboardingTips" class="onboarding-tips"></div>
           </div>
 
           <div class="generator-notes">
@@ -415,6 +423,13 @@
               </select>
             </label>
             <label class="control">
+              <span>收藏</span>
+              <select id="motifFavoriteFilter">
+                <option value="all">全部</option>
+                <option value="starred">仅收藏</option>
+              </select>
+            </label>
+            <label class="control">
               <span>名称</span>
               <input id="motifNameInput" type="text" placeholder="Moon Skip" />
             </label>
@@ -440,6 +455,16 @@
           <div class="motif-filter-bar">
             <span id="motifFilterSummary" class="panel-tag"></span>
             <button id="clearMotifFiltersBtn" type="button">Clear Filters</button>
+          </div>
+          <div class="motif-batch-bar">
+            <span id="motifSelectionSummary" class="panel-tag">已选 0 项</span>
+            <div class="button-row compact-actions">
+              <button id="selectVisibleMotifsBtn" type="button">全选当前筛选</button>
+              <button id="clearMotifSelectionBtn" type="button">清空选择</button>
+              <button id="batchAddMotifsToPhraseBtn" type="button">批量加入 Phrase</button>
+              <button id="batchFavoriteMotifsBtn" type="button">批量收藏</button>
+              <button id="batchDeleteMotifsBtn" type="button">批量删除</button>
+            </div>
           </div>
 
           <div id="motifLibrary" class="motif-library"></div>
@@ -496,7 +521,7 @@
       <article class="motif-card">
         <div class="motif-card-head">
           <div>
-            <h3 class="motif-name"></h3>
+            <label class="motif-select"><input type="checkbox" data-role="select-motif" /><h3 class="motif-name"></h3></label>
             <p class="motif-meta"></p>
             <p class="motif-provenance"></p>
           </div>
@@ -511,6 +536,7 @@
           <button data-action="transpose">+2</button>
           <button data-action="answer">收尾句</button>
           <button data-action="duplicate">复制</button>
+          <button data-action="favorite">收藏</button>
           <button data-action="edit">编辑</button>
           <button data-action="delete">删除</button>
         </div>
@@ -656,7 +682,31 @@
       </article>
     </template>
 
+
+    <dialog id="motifEditDialog" class="edit-dialog">
+      <form method="dialog" id="motifEditForm" class="edit-dialog-form">
+        <h3>编辑 Motif</h3>
+        <label class="control">
+          <span>名称</span>
+          <input id="motifEditNameInput" type="text" />
+        </label>
+        <label class="control">
+          <span>风格</span>
+          <input id="motifEditStyleInput" type="text" />
+        </label>
+        <label class="control">
+          <span>标签（逗号分隔）</span>
+          <input id="motifEditTagsInput" type="text" />
+        </label>
+        <div class="button-row compact-actions">
+          <button id="motifEditCancelBtn" type="button">取消</button>
+          <button id="motifEditSaveBtn" type="submit" class="primary-button">保存修改</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="./core.js"></script>
+    <script src="./io-utils.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
