@@ -129,36 +129,40 @@ test("tail mode trends toward a lower closing register", function () {
   assert.ok(mids[mids.length - 1] <= mids[0], "expected tail to close at or below its opening pitch");
 });
 
-test("cadence mode closes on a stable chord tone", function () {
+test("cadence mode with root target consistently closes on the tonic", function () {
   const scale = core.createScaleDefinition(0, "ionian");
   const instrument = core.INSTRUMENT_PRESETS[0];
-  const source = core.generatePattern({
-    pattern: core.createEmptyPattern({ grid: 16 }),
-    scaleDefinition: scale,
-    instrumentProfile: instrument,
-    density: 0.55,
-    maxLeap: 5,
-    repeatRate: 0.35,
-    surprise: 0.18,
-    tensionCurve: "rise",
-    mode: "new",
-  });
-  const cadence = core.generatePattern({
-    pattern: core.createEmptyPattern({ grid: 16 }),
-    sourcePattern: source,
-    scaleDefinition: scale,
-    instrumentProfile: instrument,
-    density: 0.35,
-    maxLeap: 4,
-    repeatRate: 0.2,
-    surprise: 0.08,
-    tensionCurve: "fall",
-    mode: "cadence",
-  });
 
-  const lastMidi = core.pitchSpecToMidi(cadence.notes[cadence.notes.length - 1].pitch);
-  const lastPc = core.normalizePc(lastMidi);
-  assert.ok(lastPc === scale.rootPc || lastPc === core.normalizePc(scale.rootPc + 7));
+  for (let run = 0; run < 8; run += 1) {
+    const source = core.generatePattern({
+      pattern: core.createEmptyPattern({ grid: 16 }),
+      scaleDefinition: scale,
+      instrumentProfile: instrument,
+      density: 0.55,
+      maxLeap: 5,
+      repeatRate: 0.35,
+      surprise: 0.18,
+      tensionCurve: "rise",
+      mode: "new",
+    });
+    const cadence = core.generatePattern({
+      pattern: core.createEmptyPattern({ grid: 16 }),
+      sourcePattern: source,
+      scaleDefinition: scale,
+      instrumentProfile: instrument,
+      density: 0.35,
+      maxLeap: 4,
+      repeatRate: 0.2,
+      surprise: 0.08,
+      tensionCurve: "fall",
+      mode: "cadence",
+      cadenceTarget: "root",
+    });
+
+    const lastMidi = core.pitchSpecToMidi(cadence.notes[cadence.notes.length - 1].pitch);
+    const lastPc = core.normalizePc(lastMidi);
+    assert.equal(lastPc, scale.rootPc);
+  }
 });
 
 test("generator respects locked form and melodic cell", function () {

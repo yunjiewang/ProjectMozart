@@ -41,3 +41,18 @@
 ## 持续工程化（已完成部分）
 - 自动化测试：核心生成与变换逻辑已有单元测试。
 - 核心能力（如 frozen block、cadence target）已有回归测试样例。
+- 新增 `io-utils.js` 共享 JSON 导入导出工具，统一 generator preset / project 状态的序列化与解析路径。
+- 新增 generator preset bundle 与 JSON 解析错误处理测试，降低导入导出回归风险。
+
+## 2026-03 迭代补充（工程化）
+- 将重复的 JSON 导入导出逻辑抽离为 `io-utils.js`，统一 preset/project 的序列化与解析入口。
+- 为 IO 工具补充回归测试：bundle 深拷贝、导入归一化过滤、JSON 异常处理、extract 过程防止源数据被 mapper 污染。
+- 调整文档流程：TODO 恢复为纯 pending 清单，并新增下一重大版本（v0.8 候选）里程碑规划。
+
+## 2026-03 迭代补充（UX）
+- 新增可选紧凑布局开关（Compact Layout），适配小屏笔记本查看与操作密度。
+- 新增轻量 onboarding tips：覆盖 generator 模式、motif provenance、morph trail、preset 工作流，并支持逐条隐藏与重置。
+- Motif Library 新增收藏（star）能力与「仅收藏」筛选视图，提升常用素材回访效率。
+- Motif 编辑改为 in-app dialog（名称/风格/标签），不再依赖该流程的 `window.prompt`，并保持对 phrase 引用块名称同步。
+- Motif Library 新增多选与批量动作：全选当前筛选、批量加入 Phrase、批量收藏、批量删除。
+- 稳定化 `cadence` 随机测试：将回归断言改为显式 `cadenceTarget: root` 并进行多轮采样，修复首次运行偶发失败。

@@ -1118,3 +1118,109 @@ h1 {
     align-items: stretch;
   }
 }
+
+.hero-inline-controls {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.inline-check {
+  min-width: 120px;
+}
+
+.onboarding-tips {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.onboarding-tip-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.onboarding-tip-card p {
+  margin: 4px 0 0;
+  color: var(--subtle);
+  font-size: 0.9rem;
+}
+
+.onboarding-tip-card button {
+  align-self: center;
+}
+
+body.compact-layout .app-shell {
+  padding: 14px;
+  gap: 12px;
+}
+
+body.compact-layout .hero-bar,
+body.compact-layout .panel {
+  border-radius: 18px;
+  padding: 14px;
+}
+
+body.compact-layout .workspace {
+  gap: 12px;
+}
+
+body.compact-layout .button-row {
+  gap: 6px;
+}
+
+body.compact-layout .history-list,
+body.compact-layout .motif-library,
+body.compact-layout .instrument-library-list {
+  max-height: 260px;
+}
+
+
+.motif-card .motif-name {
+  letter-spacing: 0.01em;
+}
+
+
+.edit-dialog {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0;
+  max-width: 460px;
+  width: min(92vw, 460px);
+}
+
+.edit-dialog::backdrop {
+  background: rgba(28, 18, 38, 0.42);
+}
+
+.edit-dialog-form {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+
+.motif-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.motif-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.motif-select input {
+  margin: 0;
+}
